@@ -30,6 +30,12 @@ pub fn load_world(conn: &Connection) -> Result<Option<World>, String> {
     }
 }
 
+/// Check if a save exists.
+pub fn has_save(conn: &Connection) -> Result<bool, String> {
+    let data = database::load_game_state(conn)?;
+    Ok(data.is_some())
+}
+
 /// Delete the active save and record the run.
 pub fn end_run(conn: &Connection, world: &World) -> Result<(), String> {
     let cause = if world.victory {
@@ -62,4 +68,81 @@ pub fn end_run(conn: &Connection, world: &World) -> Result<(), String> {
 
     database::delete_save(conn)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::persistence::database::init_schema;
+
+    fn in_memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn save_and_load_round_trip() {
+        let conn = in_memory_db();
+        let world = World::new(42);
+        let original_seed = world.seed;
+        let original_floor = world.floor;
+        let original_turn = world.turn;
+
+        save_world(&conn, &world).unwrap();
+        let loaded = load_world(&conn).unwrap();
+        assert!(loaded.is_some());
+
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.seed, original_seed);
+        assert_eq!(loaded.floor, original_floor);
+        assert_eq!(loaded.turn, original_turn);
+        assert_eq!(loaded.entities.len(), world.entities.len());
+    }
+
+    #[test]
+    fn load_returns_none_when_no_save() {
+        let conn = in_memory_db();
+        let loaded = load_world(&conn).unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn has_save_works() {
+        let conn = in_memory_db();
+        assert!(!has_save(&conn).unwrap());
+        let world = World::new(42);
+        save_world(&conn, &world).unwrap();
+        assert!(has_save(&conn).unwrap());
+    }
+
+    #[test]
+    fn end_run_deletes_save_and_records() {
+        let conn = in_memory_db();
+        let world = World::new(42);
+        save_world(&conn, &world).unwrap();
+        assert!(has_save(&conn).unwrap());
+
+        end_run(&conn, &world).unwrap();
+        assert!(!has_save(&conn).unwrap());
+
+        // Should have a run in history
+        let runs = database::get_run_history(&conn).unwrap();
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn overwrite_save() {
+        let conn = in_memory_db();
+        let mut world = World::new(42);
+        save_world(&conn, &world).unwrap();
+
+        world.floor = 5;
+        world.turn = 100;
+        save_world(&conn, &world).unwrap();
+
+        let loaded = load_world(&conn).unwrap().unwrap();
+        assert_eq!(loaded.floor, 5);
+        assert_eq!(loaded.turn, 100);
+    }
 }

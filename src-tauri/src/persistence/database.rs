@@ -16,6 +16,11 @@ pub fn open_database(path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// Initialize schema on an existing connection (useful for in-memory testing).
+pub fn init_schema(conn: &Connection) -> Result<(), String> {
+    run_migrations(conn)
+}
+
 fn run_migrations(conn: &Connection) -> Result<(), String> {
     // Create schema_version table if it doesn't exist
     conn.execute_batch(
@@ -208,4 +213,90 @@ pub fn get_run_history(conn: &Connection) -> Result<Vec<crate::engine::entity::R
         .collect();
 
     Ok(runs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn schema_creates_tables() {
+        let conn = test_db();
+        // Verify all tables exist by querying them
+        assert!(!has_save(&conn));
+        let scores = get_high_scores(&conn).unwrap();
+        assert!(scores.is_empty());
+        let runs = get_run_history(&conn).unwrap();
+        assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn save_and_load_game_state() {
+        let conn = test_db();
+        let data = b"test data".to_vec();
+        save_game_state(&conn, &data, 42, 1, 10).unwrap();
+        assert!(has_save(&conn));
+
+        let loaded = load_game_state(&conn).unwrap().unwrap();
+        assert_eq!(loaded, data);
+    }
+
+    #[test]
+    fn delete_save_works() {
+        let conn = test_db();
+        save_game_state(&conn, b"data", 42, 1, 10).unwrap();
+        assert!(has_save(&conn));
+        delete_save(&conn).unwrap();
+        assert!(!has_save(&conn));
+    }
+
+    #[test]
+    fn record_run_and_history() {
+        let conn = test_db();
+        record_run(&conn, "42", 5, 10, 1, 3, 50, 1250, Some("Slain by goblin"), false).unwrap();
+        let runs = get_run_history(&conn).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].floor_reached, 5);
+        assert_eq!(runs[0].score, 1250);
+        assert!(!runs[0].victory);
+    }
+
+    #[test]
+    fn high_scores_ranked() {
+        let conn = test_db();
+        record_run(&conn, "1", 1, 5, 0, 1, 20, 500, None, false).unwrap();
+        record_run(&conn, "2", 3, 15, 0, 2, 50, 1500, None, false).unwrap();
+        record_run(&conn, "3", 10, 50, 3, 5, 200, 5000, None, true).unwrap();
+
+        let scores = get_high_scores(&conn).unwrap();
+        assert_eq!(scores.len(), 3);
+        assert_eq!(scores[0].score, 5000);
+        assert_eq!(scores[0].rank, 1);
+        assert_eq!(scores[1].score, 1500);
+        assert_eq!(scores[2].score, 500);
+    }
+
+    #[test]
+    fn high_scores_pruned_to_10() {
+        let conn = test_db();
+        for i in 0..15u32 {
+            record_run(&conn, &i.to_string(), 1, i, 0, 1, 10, i * 100, None, false).unwrap();
+        }
+        let scores = get_high_scores(&conn).unwrap();
+        assert_eq!(scores.len(), 10);
+    }
+
+    #[test]
+    fn idempotent_migrations() {
+        let conn = test_db();
+        // Running migrations again should not fail
+        init_schema(&conn).unwrap();
+        assert!(!has_save(&conn));
+    }
 }

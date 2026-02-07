@@ -138,6 +138,147 @@ impl Map {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_map_all_walls() {
+        let map = Map::new(10, 10);
+        assert!(map.tiles.iter().all(|t| *t == TileType::Wall));
+    }
+
+    #[test]
+    fn default_map_dimensions() {
+        let map = Map::default_map();
+        assert_eq!(map.width, MAP_WIDTH);
+        assert_eq!(map.height, MAP_HEIGHT);
+        assert_eq!(map.tiles.len(), MAP_WIDTH * MAP_HEIGHT);
+    }
+
+    #[test]
+    fn in_bounds_checks() {
+        let map = Map::new(10, 10);
+        assert!(map.in_bounds(0, 0));
+        assert!(map.in_bounds(9, 9));
+        assert!(!map.in_bounds(-1, 0));
+        assert!(!map.in_bounds(10, 0));
+        assert!(!map.in_bounds(0, 10));
+    }
+
+    #[test]
+    fn set_and_get_tile() {
+        let mut map = Map::new(10, 10);
+        map.set_tile(3, 4, TileType::Floor);
+        assert_eq!(map.get_tile(3, 4), TileType::Floor);
+        assert_eq!(map.get_tile(0, 0), TileType::Wall);
+    }
+
+    #[test]
+    fn out_of_bounds_returns_wall() {
+        let map = Map::new(10, 10);
+        assert_eq!(map.get_tile(-1, 0), TileType::Wall);
+        assert_eq!(map.get_tile(100, 0), TileType::Wall);
+    }
+
+    #[test]
+    fn walkability() {
+        let mut map = Map::new(10, 10);
+        assert!(!map.is_walkable(5, 5)); // wall
+        map.set_tile(5, 5, TileType::Floor);
+        map.refresh_blocked();
+        assert!(map.is_walkable(5, 5));
+        map.set_tile(5, 5, TileType::DoorClosed);
+        map.refresh_blocked();
+        assert!(!map.is_walkable(5, 5));
+        map.set_tile(5, 5, TileType::DoorOpen);
+        map.refresh_blocked();
+        assert!(map.is_walkable(5, 5));
+    }
+
+    #[test]
+    fn reveal_and_check() {
+        let mut map = Map::new(10, 10);
+        assert!(!map.is_revealed(3, 3));
+        map.reveal(3, 3);
+        assert!(map.is_revealed(3, 3));
+    }
+
+    #[test]
+    fn reveal_all_marks_everything() {
+        let mut map = Map::new(5, 5);
+        map.reveal_all();
+        for y in 0..5i32 {
+            for x in 0..5i32 {
+                assert!(map.is_revealed(x, y));
+            }
+        }
+    }
+
+    #[test]
+    fn idx_to_pos_round_trip() {
+        let map = Map::new(80, 50);
+        let pos = Position::new(15, 23);
+        let idx = map.pos_to_idx(&pos);
+        let back = map.idx_to_pos(idx);
+        assert_eq!(back, pos);
+    }
+
+    #[test]
+    fn tile_type_properties() {
+        assert!(!TileType::Wall.is_walkable());
+        assert!(TileType::Floor.is_walkable());
+        assert!(TileType::DownStairs.is_walkable());
+        assert!(TileType::UpStairs.is_walkable());
+        assert!(!TileType::DoorClosed.is_walkable());
+        assert!(TileType::DoorOpen.is_walkable());
+
+        assert!(TileType::Wall.blocks_fov());
+        assert!(!TileType::Floor.blocks_fov());
+        assert!(TileType::DoorClosed.blocks_fov());
+        assert!(!TileType::DoorOpen.blocks_fov());
+    }
+
+    #[test]
+    fn room_center() {
+        let room = Room::new(10, 20, 8, 6);
+        let center = room.center();
+        assert_eq!(center.x, 14);
+        assert_eq!(center.y, 23);
+    }
+
+    #[test]
+    fn room_contains() {
+        let room = Room::new(5, 5, 4, 4);
+        assert!(room.contains(&Position::new(5, 5)));
+        assert!(room.contains(&Position::new(8, 8)));
+        assert!(!room.contains(&Position::new(9, 5)));
+        assert!(!room.contains(&Position::new(4, 5)));
+    }
+
+    #[test]
+    fn room_intersects() {
+        let room1 = Room::new(0, 0, 5, 5);
+        let room2 = Room::new(3, 3, 5, 5);
+        let room3 = Room::new(10, 10, 5, 5);
+        assert!(room1.intersects(&room2));
+        assert!(!room1.intersects(&room3));
+    }
+
+    #[test]
+    fn room_inner_positions_excludes_border() {
+        let room = Room::new(0, 0, 4, 4);
+        let inner = room.inner_positions();
+        // Inner positions: (1,1), (2,1), (1,2), (2,2) = 4 positions
+        assert_eq!(inner.len(), 4);
+        // None should be on the border
+        for pos in &inner {
+            assert!(pos.x > 0 && pos.x < 3);
+            assert!(pos.y > 0 && pos.y < 3);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
     pub x: i32,

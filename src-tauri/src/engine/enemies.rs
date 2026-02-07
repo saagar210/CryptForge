@@ -193,3 +193,83 @@ pub fn apply_endless_scaling(template: &EnemyTemplate, floor: u32) -> (i32, i32,
         (template.defense as f64 * multiplier) as i32,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_enemies_returns_15() {
+        let enemies = all_enemies();
+        assert_eq!(enemies.len(), 15);
+    }
+
+    #[test]
+    fn boss_templates_returns_3() {
+        let bosses = boss_templates();
+        assert_eq!(bosses.len(), 3);
+    }
+
+    #[test]
+    fn all_enemies_have_positive_stats() {
+        for e in all_enemies() {
+            assert!(e.hp > 0, "{} has non-positive hp", e.name);
+            assert!(e.attack > 0, "{} has non-positive attack", e.name);
+            assert!(e.speed > 0, "{} has non-positive speed", e.name);
+        }
+    }
+
+    #[test]
+    fn bosses_have_boss_ai() {
+        for b in boss_templates() {
+            assert!(
+                matches!(b.ai, AIBehavior::Boss(_)),
+                "{} should have Boss AI", b.name
+            );
+        }
+    }
+
+    #[test]
+    fn enemy_pool_per_floor() {
+        for floor in 1..=10 {
+            let pool = get_enemy_pool(floor);
+            assert!(!pool.is_empty(), "Floor {} has empty enemy pool", floor);
+        }
+    }
+
+    #[test]
+    fn boss_floors() {
+        assert_eq!(get_boss_for_floor(3), Some("Goblin King"));
+        assert_eq!(get_boss_for_floor(6), Some("Troll Warlord"));
+        assert_eq!(get_boss_for_floor(10), Some("The Lich"));
+        assert_eq!(get_boss_for_floor(1), None);
+        assert_eq!(get_boss_for_floor(5), None);
+    }
+
+    #[test]
+    fn endless_scaling_no_change_before_11() {
+        let template = &all_enemies()[0]; // Rat
+        let (hp, atk, def) = apply_endless_scaling(template, 5);
+        assert_eq!(hp, template.hp);
+        assert_eq!(atk, template.attack);
+        assert_eq!(def, template.defense);
+    }
+
+    #[test]
+    fn endless_scaling_increases_after_10() {
+        let template = &all_enemies()[0]; // Rat
+        let (hp, atk, _def) = apply_endless_scaling(template, 20);
+        assert!(hp > template.hp, "HP should scale up");
+        assert!(atk > template.attack, "Attack should scale up");
+    }
+
+    #[test]
+    fn unique_enemy_names() {
+        let enemies = all_enemies();
+        let mut names: Vec<&str> = enemies.iter().map(|e| e.name).collect();
+        let len_before = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), len_before, "Enemy names should be unique");
+    }
+}

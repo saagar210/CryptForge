@@ -1929,4 +1929,82 @@ mod tests {
         // 5*100 + 10*10 + 1*500 + 3*50 = 500 + 100 + 500 + 150 = 1250
         assert_eq!(score, 1250);
     }
+
+    #[test]
+    fn seed_determinism_same_actions() {
+        // Same seed + same actions = identical state
+        let actions = vec![
+            PlayerAction { action_type: PlayerActionType::Move(Direction::E) },
+            PlayerAction { action_type: PlayerActionType::Move(Direction::S) },
+            PlayerAction { action_type: PlayerActionType::Wait },
+            PlayerAction { action_type: PlayerActionType::Move(Direction::N) },
+            PlayerAction { action_type: PlayerActionType::Move(Direction::W) },
+        ];
+
+        let mut world1 = World::new(12345);
+        let mut world2 = World::new(12345);
+
+        for action in &actions {
+            world1.resolve_turn(action.clone());
+            world2.resolve_turn(action.clone());
+        }
+
+        assert_eq!(world1.turn, world2.turn);
+        assert_eq!(world1.floor, world2.floor);
+        assert_eq!(world1.player_xp, world2.player_xp);
+        assert_eq!(world1.enemies_killed, world2.enemies_killed);
+
+        // Player positions should be identical
+        let p1 = world1.get_entity(world1.player_id).unwrap();
+        let p2 = world2.get_entity(world2.player_id).unwrap();
+        assert_eq!(p1.position, p2.position);
+    }
+
+    #[test]
+    fn different_seeds_produce_different_maps() {
+        let world1 = World::new(1);
+        let world2 = World::new(99999);
+
+        // Maps should differ (extremely unlikely to be identical with different seeds)
+        let tiles_match = world1.map.tiles.iter()
+            .zip(world2.map.tiles.iter())
+            .all(|(a, b)| a == b);
+        assert!(!tiles_match, "Different seeds should produce different maps");
+    }
+
+    #[test]
+    fn world_serialization_round_trip() {
+        let world = World::new(42);
+        let json = serde_json::to_vec(&world).unwrap();
+        let loaded: World = serde_json::from_slice(&json).unwrap();
+
+        assert_eq!(loaded.seed, world.seed);
+        assert_eq!(loaded.floor, world.floor);
+        assert_eq!(loaded.turn, world.turn);
+        assert_eq!(loaded.entities.len(), world.entities.len());
+        assert_eq!(loaded.map.width, world.map.width);
+        assert_eq!(loaded.map.height, world.map.height);
+    }
+
+    #[test]
+    fn player_exists_after_creation() {
+        let world = World::new(42);
+        let player = world.get_entity(world.player_id);
+        assert!(player.is_some());
+        let player = player.unwrap();
+        assert!(player.health.is_some());
+        assert!(player.combat.is_some());
+        assert!(player.fov.is_some());
+        assert!(player.equipment.is_some());
+        assert!(player.inventory.is_some());
+    }
+
+    #[test]
+    fn enemies_spawned_on_floor() {
+        let world = World::new(42);
+        let enemy_count = world.entities.iter()
+            .filter(|e| e.ai.is_some() && e.id != world.player_id)
+            .count();
+        assert!(enemy_count > 0, "Floor should have enemies");
+    }
 }

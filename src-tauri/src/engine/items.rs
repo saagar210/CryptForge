@@ -332,3 +332,88 @@ pub fn get_loot_pool(floor: u32) -> Vec<&'static str> {
 pub fn find_template(name: &str) -> Option<ItemTemplate> {
     all_items().into_iter().find(|t| t.name == name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_items_non_empty() {
+        let items = all_items();
+        assert!(items.len() > 30, "Should have 30+ items, got {}", items.len());
+    }
+
+    #[test]
+    fn items_have_valid_types() {
+        for item in all_items() {
+            // Equipment items should have slots
+            match item.item_type {
+                ItemType::Weapon | ItemType::Armor | ItemType::Shield
+                | ItemType::Ring | ItemType::Amulet => {
+                    assert!(item.slot.is_some(), "{} is equipment but has no slot", item.name);
+                }
+                ItemType::Potion | ItemType::Scroll | ItemType::Food
+                | ItemType::Wand | ItemType::Key => {
+                    assert!(item.slot.is_none(), "{} is consumable but has a slot", item.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn consumables_have_effects() {
+        for item in all_items() {
+            match item.item_type {
+                ItemType::Potion | ItemType::Scroll | ItemType::Food | ItemType::Wand => {
+                    assert!(item.effect.is_some(), "{} is consumable but has no effect", item.name);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn find_template_works() {
+        let dagger = find_template("Dagger");
+        assert!(dagger.is_some());
+        assert_eq!(dagger.unwrap().name, "Dagger");
+    }
+
+    #[test]
+    fn find_template_missing() {
+        assert!(find_template("Nonexistent Item").is_none());
+    }
+
+    #[test]
+    fn loot_pool_scales_with_floor() {
+        let pool_f1 = get_loot_pool(1);
+        let pool_f10 = get_loot_pool(10);
+        assert!(pool_f10.len() >= pool_f1.len(), "Higher floors should have equal or more items");
+    }
+
+    #[test]
+    fn loot_pool_excludes_keys() {
+        for floor in 1..=10 {
+            let pool = get_loot_pool(floor);
+            assert!(!pool.contains(&"Iron Key"), "Loot pool should not contain keys");
+            assert!(!pool.contains(&"Boss Key"), "Loot pool should not contain boss keys");
+        }
+    }
+
+    #[test]
+    fn rarity_weights() {
+        assert!(Rarity::Common.weight() > Rarity::Uncommon.weight());
+        assert!(Rarity::Uncommon.weight() > Rarity::Rare.weight());
+        assert!(Rarity::Rare.weight() > Rarity::VeryRare.weight());
+    }
+
+    #[test]
+    fn unique_item_names() {
+        let items = all_items();
+        let mut names: Vec<&str> = items.iter().map(|i| i.name).collect();
+        let len_before = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), len_before, "Item names should be unique");
+    }
+}

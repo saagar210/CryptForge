@@ -48,3 +48,61 @@ fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> 
     ).map_err(|e| format!("Set setting '{}': {}", key, e))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::persistence::database::init_schema;
+
+    fn in_memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn load_defaults_when_empty() {
+        let conn = in_memory_db();
+        let settings = load_settings(&conn);
+        assert_eq!(settings.tile_size, 32);
+        assert_eq!(settings.master_volume, 80);
+        assert_eq!(settings.sfx_volume, 80);
+        assert_eq!(settings.ambient_volume, 50);
+        assert!(!settings.fullscreen);
+        assert!(!settings.ollama_enabled);
+    }
+
+    #[test]
+    fn save_and_load_round_trip() {
+        let conn = in_memory_db();
+        let mut settings = Settings::default();
+        settings.master_volume = 50;
+        settings.sfx_volume = 30;
+        settings.fullscreen = true;
+        settings.ollama_enabled = true;
+        settings.ollama_model = "mistral".to_string();
+
+        save_settings(&conn, &settings).unwrap();
+        let loaded = load_settings(&conn);
+
+        assert_eq!(loaded.master_volume, 50);
+        assert_eq!(loaded.sfx_volume, 30);
+        assert!(loaded.fullscreen);
+        assert!(loaded.ollama_enabled);
+        assert_eq!(loaded.ollama_model, "mistral");
+    }
+
+    #[test]
+    fn overwrite_settings() {
+        let conn = in_memory_db();
+        let mut settings = Settings::default();
+        settings.master_volume = 100;
+        save_settings(&conn, &settings).unwrap();
+
+        settings.master_volume = 25;
+        save_settings(&conn, &settings).unwrap();
+
+        let loaded = load_settings(&conn);
+        assert_eq!(loaded.master_volume, 25);
+    }
+}
