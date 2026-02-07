@@ -1,11 +1,14 @@
 use std::collections::{BinaryHeap, VecDeque};
 use std::cmp::Ordering;
 
+use serde::{Deserialize, Serialize};
+
 use super::entity::Position;
 use super::map::Map;
 
 pub const UNREACHABLE: i32 = i32::MAX;
 
+#[derive(Serialize, Deserialize)]
 pub struct DijkstraMap {
     pub width: usize,
     pub height: usize,
