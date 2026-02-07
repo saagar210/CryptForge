@@ -28,6 +28,7 @@ pub fn spawn_player(pos: Position) -> Entity {
             base_defense: 2,
             base_speed: 100,
             crit_chance: 0.05,
+            ranged: None,
         }),
         ai: None,
         inventory: Some(Inventory::new(20)),
@@ -40,6 +41,8 @@ pub fn spawn_player(pos: Position) -> Entity {
         stair: None,
         loot_table: None,
         flavor_text: None,
+        shop: None,
+        interactive: None,
     }
 }
 
@@ -96,10 +99,27 @@ pub fn spawn_entities(map: &Map, floor: u32, rng: &mut impl Rng) -> Vec<Entity> 
                     }
                 }
                 // Place locked door (handled separately in map)
+                // Place a lever in the boss room
+                if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                    entities.push(create_interactable(InteractionType::Lever, pos, None));
+                    occupied.insert(pos);
+                }
             }
             RoomType::Treasure => {
-                // 3-5 items
-                let item_count = rng.gen_range(3..=5);
+                // 1 chest with 1-2 items
+                if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                    let item_count = rng.gen_range(1..=2);
+                    let mut chest_items = Vec::new();
+                    for _ in 0..item_count {
+                        if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
+                            chest_items.push(item.entity.name.clone());
+                        }
+                    }
+                    entities.push(create_interactable(InteractionType::Chest, pos, Some(chest_items)));
+                    occupied.insert(pos);
+                }
+                // 1-3 loose items
+                let item_count = rng.gen_range(1..=3);
                 for _ in 0..item_count {
                     if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
                         if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
@@ -131,12 +151,29 @@ pub fn spawn_entities(map: &Map, floor: u32, rng: &mut impl Rng) -> Vec<Entity> 
                 }
             }
             RoomType::Shrine => {
+                // 1 fountain or altar
+                if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                    if rng.gen::<f32>() < 0.5 {
+                        entities.push(create_interactable(InteractionType::Fountain, pos, None));
+                    } else {
+                        entities.push(create_interactable(InteractionType::Altar, pos, None));
+                    }
+                    occupied.insert(pos);
+                }
                 // 1 good item
                 if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
                     if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
                         entities.push(item.with_position(pos));
                         occupied.insert(pos);
                     }
+                }
+            }
+            RoomType::Shop => {
+                // Shopkeeper with randomized inventory
+                if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                    let shop_items = generate_shop_inventory(floor, rng, &all_item_templates);
+                    entities.push(create_shopkeeper(pos, shop_items));
+                    occupied.insert(pos);
                 }
             }
             RoomType::Normal => {
@@ -159,6 +196,14 @@ pub fn spawn_entities(map: &Map, floor: u32, rng: &mut impl Rng) -> Vec<Entity> 
                             entities.push(item.with_position(pos));
                             occupied.insert(pos);
                         }
+                    }
+                }
+                // 0-2 barrels
+                let barrel_count = rng.gen_range(0..=2);
+                for _ in 0..barrel_count {
+                    if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                        entities.push(create_interactable(InteractionType::Barrel, pos, None));
+                        occupied.insert(pos);
                     }
                 }
             }
@@ -205,6 +250,8 @@ pub fn spawn_entities(map: &Map, floor: u32, rng: &mut impl Rng) -> Vec<Entity> 
                 stair: None,
                 loot_table: None,
                 flavor_text: None,
+                shop: None,
+                interactive: None,
             });
             occupied.insert(pos);
         }
@@ -271,6 +318,7 @@ fn create_enemy_from_template(
             base_defense: defense,
             base_speed: template.speed,
             crit_chance: template.crit_chance,
+            ranged: None,
         }),
         ai: Some(template.ai.clone()),
         inventory: None,
@@ -283,6 +331,8 @@ fn create_enemy_from_template(
         stair: None,
         loot_table: None,
         flavor_text: None,
+        shop: None,
+        interactive: None,
     }
 }
 
@@ -313,6 +363,8 @@ fn create_item(
             effect: t.effect.clone(),
             charges: t.charges,
             energy_cost: t.energy_cost,
+            ammo_type: t.ammo_type,
+            ranged: t.ranged,
         }),
         status_effects: Vec::new(),
         fov: None,
@@ -321,6 +373,8 @@ fn create_item(
         stair: None,
         loot_table: None,
         flavor_text: None,
+        shop: None,
+        interactive: None,
     }
 }
 
@@ -375,6 +429,8 @@ fn pick_weighted_item(
                     effect: t.effect.clone(),
                     charges: t.charges,
                     energy_cost: t.energy_cost,
+                    ammo_type: t.ammo_type,
+                    ranged: t.ranged,
                 }),
                 status_effects: Vec::new(),
                 fov: None,
@@ -383,10 +439,134 @@ fn pick_weighted_item(
                 stair: None,
                 loot_table: None,
                 flavor_text: None,
+                shop: None,
+                interactive: None,
             };
             return Some(ItemWithPosition { entity });
         }
         roll -= w;
     }
     None
+}
+
+fn generate_shop_inventory(
+    floor: u32,
+    rng: &mut impl Rng,
+    templates: &[crate::engine::items::ItemTemplate],
+) -> Vec<ShopItem> {
+    let eligible: Vec<&crate::engine::items::ItemTemplate> = templates
+        .iter()
+        .filter(|t| t.min_floor <= floor + 1 && t.item_type != ItemType::Key && t.item_type != ItemType::Projectile)
+        .collect();
+
+    let count = rng.gen_range(4..=6).min(eligible.len());
+    let mut items = Vec::new();
+    let mut used_names: HashSet<String> = HashSet::new();
+
+    for _ in 0..count * 3 {
+        if items.len() >= count {
+            break;
+        }
+        let idx = rng.gen_range(0..eligible.len());
+        let t = eligible[idx];
+        if used_names.contains(t.name) {
+            continue;
+        }
+        let price = match t.rarity {
+            crate::engine::items::Rarity::Common => 5,
+            crate::engine::items::Rarity::Uncommon => 12,
+            crate::engine::items::Rarity::Rare => 25,
+            crate::engine::items::Rarity::VeryRare => 50,
+        } + floor / 2;
+
+        items.push(ShopItem {
+            name: t.name.to_string(),
+            price,
+            item_type: t.item_type,
+            slot: t.slot,
+        });
+        used_names.insert(t.name.to_string());
+    }
+
+    items
+}
+
+fn create_shopkeeper(pos: Position, shop_items: Vec<ShopItem>) -> Entity {
+    Entity {
+        id: next_id(),
+        name: "Shopkeeper".to_string(),
+        position: pos,
+        glyph: 0x24, // '$' symbol
+        render_order: RenderOrder::Enemy,
+        blocks_movement: true,
+        blocks_fov: false,
+        health: None,
+        combat: None,
+        ai: None,
+        inventory: None,
+        equipment: None,
+        item: None,
+        status_effects: Vec::new(),
+        fov: None,
+        door: None,
+        trap: None,
+        stair: None,
+        loot_table: None,
+        flavor_text: Some("A weathered merchant. Bump to trade.".to_string()),
+        shop: Some(ShopInventory {
+            items: shop_items,
+            buy_multiplier: 1.0,
+        }),
+        interactive: None,
+    }
+}
+
+fn create_interactable(
+    interaction_type: InteractionType,
+    pos: Position,
+    contained_items: Option<Vec<String>>,
+) -> Entity {
+    let (name, glyph, blocks_movement) = match interaction_type {
+        InteractionType::Barrel => ("Barrel", 0x6F, true),      // 'o'
+        InteractionType::Lever => ("Lever", 0x2F, false),       // '/'
+        InteractionType::Fountain => ("Fountain", 0x7E, false), // '~'
+        InteractionType::Altar => ("Altar", 0x2B, false),       // '+'
+        InteractionType::Chest => ("Chest", 0x3D, false),       // '='
+    };
+
+    let uses = match interaction_type {
+        InteractionType::Fountain | InteractionType::Altar | InteractionType::Chest => Some(1),
+        InteractionType::Barrel => Some(1),
+        InteractionType::Lever => None,
+    };
+
+    Entity {
+        id: next_id(),
+        name: name.to_string(),
+        position: pos,
+        glyph,
+        render_order: RenderOrder::Item,
+        blocks_movement,
+        blocks_fov: false,
+        health: None,
+        combat: None,
+        ai: None,
+        inventory: None,
+        equipment: None,
+        item: None,
+        status_effects: Vec::new(),
+        fov: None,
+        door: None,
+        trap: None,
+        stair: None,
+        loot_table: None,
+        flavor_text: None,
+        shop: None,
+        interactive: Some(Interactive {
+            interaction_type,
+            uses_remaining: uses,
+            activated: false,
+            contained_items: contained_items.unwrap_or_default(),
+        }),
+    }
 }

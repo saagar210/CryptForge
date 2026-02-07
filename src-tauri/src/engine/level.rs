@@ -83,6 +83,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                ranged: None,
             }),
             ai: None,
             inventory: Some(Inventory::new(20)),
@@ -95,6 +96,8 @@ mod tests {
             stair: None,
             loot_table: None,
             flavor_text: None,
+            shop: None,
+            interactive: None,
         }
     }
 

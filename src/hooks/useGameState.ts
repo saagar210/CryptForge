@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type {
   TurnResult,
   GameState,
@@ -27,6 +27,13 @@ interface UseGameStateReturn {
   equipItem: (index: number) => Promise<void>;
   unequipSlot: (slot: EquipSlot) => Promise<void>;
   levelUpChoice: (choice: LevelUpChoice) => Promise<void>;
+  interact: () => Promise<void>;
+  clickMove: (x: number, y: number) => Promise<void>;
+  rangedAttack: (targetId: number) => Promise<void>;
+  buyItem: (shopId: number, index: number) => Promise<void>;
+  sellItem: (index: number, shopId: number) => Promise<void>;
+  startAutoExplore: () => Promise<void>;
+  cancelAutoExplore: () => void;
   saveGame: () => Promise<void>;
 }
 
@@ -84,6 +91,42 @@ export function useGameState(): UseGameStateReturn {
   const equipItem = useCallback((index: number) => doAction(api.equipItemAction(index)), [doAction]);
   const unequipSlot = useCallback((slot: EquipSlot) => doAction(api.unequipSlotAction(slot)), [doAction]);
   const levelUpChoice = useCallback((choice: LevelUpChoice) => doAction(api.levelUpAction(choice)), [doAction]);
+  const interact = useCallback(() => doAction(api.interactAction()), [doAction]);
+  const clickMove = useCallback((x: number, y: number) => doAction(api.clickMoveAction(x, y)), [doAction]);
+  const rangedAttack = useCallback((targetId: number) => doAction(api.rangedAttackAction(targetId)), [doAction]);
+  const buyItem = useCallback((shopId: number, index: number) => doAction(api.buyItemAction(shopId, index)), [doAction]);
+  const sellItem = useCallback((index: number, shopId: number) => doAction(api.sellItemAction(index, shopId)), [doAction]);
+
+  const autoExploreRef = useRef(false);
+
+  const cancelAutoExplore = useCallback(() => {
+    autoExploreRef.current = false;
+  }, []);
+
+  const startAutoExplore = useCallback(async () => {
+    autoExploreRef.current = true;
+    const loop = async () => {
+      if (!autoExploreRef.current) return;
+      try {
+        const result = await api.playerAction(api.autoExploreAction());
+        handleResult(result);
+        if (result.auto_explore_interrupt) {
+          autoExploreRef.current = false;
+          return;
+        }
+        if (result.game_over) {
+          autoExploreRef.current = false;
+          return;
+        }
+        if (autoExploreRef.current) {
+          setTimeout(loop, 80);
+        }
+      } catch {
+        autoExploreRef.current = false;
+      }
+    };
+    loop();
+  }, [handleResult]);
 
   const saveGame = useCallback(async () => {
     try {
@@ -109,6 +152,13 @@ export function useGameState(): UseGameStateReturn {
     equipItem,
     unequipSlot,
     levelUpChoice,
+    interact,
+    clickMove,
+    rangedAttack,
+    buyItem,
+    sellItem,
+    startAutoExplore,
+    cancelAutoExplore,
     saveGame,
   };
 }

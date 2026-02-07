@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
-import type { GameEvent } from "../types/game";
-import { playSfx, initAudio, startAmbient, stopAmbient, setVolumes } from "../lib/audio";
+import type { GameEvent, Biome } from "../types/game";
+import { playSfx, initAudio, startAmbient, stopAmbient, setVolumes, updateAmbientBiome } from "../lib/audio";
 
 export function useAudio(
   events: GameEvent[],
   masterVolume: number,
   sfxVolume: number,
   ambientVolume: number,
+  biome?: Biome,
 ): void {
   const initialized = useRef(false);
   const prevEventsRef = useRef<GameEvent[]>([]);
@@ -33,6 +34,13 @@ export function useAudio(
   useEffect(() => {
     setVolumes(masterVolume, sfxVolume, ambientVolume);
   }, [masterVolume, sfxVolume, ambientVolume]);
+
+  // Update ambient for biome
+  useEffect(() => {
+    if (biome && initialized.current) {
+      updateAmbientBiome(biome);
+    }
+  }, [biome]);
 
   // Play sounds for new events
   useEffect(() => {

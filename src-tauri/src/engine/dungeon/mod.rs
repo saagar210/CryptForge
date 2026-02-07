@@ -59,7 +59,7 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
     };
 
     // Assign room types
-    assign_room_types(&mut map.rooms, &mut rng, is_boss_floor);
+    assign_room_types(&mut map.rooms, &mut rng, is_boss_floor, floor);
 
     // Place stairs in the furthest room from start
     if let Some(stairs_idx) = get_stairs_room_idx(&map.rooms) {

@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS: SettingsType = {
   ollama_url: "http://localhost:11434",
   ollama_model: "llama3.2",
   ollama_timeout: 3,
+  tileset_mode: "ascii",
 };
 
 export function Settings({ onBack }: SettingsProps) {
@@ -55,6 +56,7 @@ export function Settings({ onBack }: SettingsProps) {
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Display</h3>
         <CheckRow label="Fullscreen" checked={settings.fullscreen} onChange={(v) => update("fullscreen", v)} />
+        <SelectRow label="Tileset" value={settings.tileset_mode} options={[{ value: "ascii", label: "ASCII" }, { value: "sprite", label: "Sprites (DawnLike)" }]} onChange={(v) => update("tileset_mode", v)} />
       </div>
 
       <div style={styles.section}>
@@ -89,6 +91,19 @@ function CheckRow({ label, checked, onChange }: { label: string; checked: boolea
     <div style={styles.row}>
       <span style={styles.label}>{label}</span>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </div>
+  );
+}
+
+function SelectRow({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+  return (
+    <div style={styles.row}>
+      <span style={styles.label}>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={styles.textInput}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
     </div>
   );
 }

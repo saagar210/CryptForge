@@ -3,7 +3,7 @@ use rand::Rng;
 use crate::engine::entity::Position;
 use crate::engine::map::{Room, RoomType};
 
-pub fn assign_room_types(rooms: &mut Vec<Room>, rng: &mut impl Rng, is_boss_floor: bool) {
+pub fn assign_room_types(rooms: &mut Vec<Room>, rng: &mut impl Rng, is_boss_floor: bool, floor: u32) {
     if rooms.is_empty() {
         return;
     }
@@ -48,6 +48,20 @@ pub fn assign_room_types(rooms: &mut Vec<Room>, rng: &mut impl Rng, is_boss_floo
             rooms[boss_idx].room_type = RoomType::Boss;
         }
         // Mark stairs location (actual stair tiles placed separately)
+    }
+
+    // Shop room on floors 2, 5, 8 and every 3 floors in endless
+    let is_shop_floor = floor == 2 || floor == 5 || floor == 8 || (floor > 10 && floor % 3 == 0);
+    if is_shop_floor {
+        // Find a middle-distance Normal room for the shop
+        let skip = if is_boss_floor { 2 } else { 1 };
+        let mid = by_distance.len() / 2;
+        for &(idx, _) in by_distance.iter().skip(skip.max(mid)).take(3) {
+            if rooms[idx].room_type == RoomType::Normal {
+                rooms[idx].room_type = RoomType::Shop;
+                break;
+            }
+        }
     }
 
     // Assign special types to remaining rooms

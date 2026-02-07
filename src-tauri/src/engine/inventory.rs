@@ -115,6 +115,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                ranged: None,
             }),
             ai: None,
             inventory: Some(Inventory::new(20)),
@@ -127,6 +128,8 @@ mod tests {
             stair: None,
             loot_table: None,
             flavor_text: None,
+            shop: None,
+            interactive: None,
         }
     }
 
@@ -151,6 +154,8 @@ mod tests {
                 effect: None,
                 charges: None,
                 energy_cost: 100,
+                ammo_type: None,
+                ranged: None,
             }),
             status_effects: Vec::new(),
             fov: None,
@@ -159,6 +164,8 @@ mod tests {
             stair: None,
             loot_table: None,
             flavor_text: None,
+            shop: None,
+            interactive: None,
         }
     }
 

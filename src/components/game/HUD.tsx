@@ -1,12 +1,22 @@
+import { useState } from "react";
 import type { PlayerState } from "../../types/game";
 
 interface HUDProps {
   player: PlayerState;
   floor: number;
   turn: number;
+  seed: number;
 }
 
-export function HUD({ player, floor, turn }: HUDProps) {
+export function HUD({ player, floor, turn, seed }: HUDProps) {
+  const [seedCopied, setSeedCopied] = useState(false);
+
+  const copySeed = () => {
+    navigator.clipboard.writeText(seed.toString()).then(() => {
+      setSeedCopied(true);
+      setTimeout(() => setSeedCopied(false), 1500);
+    }).catch(() => {});
+  };
   const hpPct = player.max_hp > 0 ? (player.hp / player.max_hp) * 100 : 0;
   const xpPct = player.xp_to_next > 0 ? (player.xp / player.xp_to_next) * 100 : 0;
   const hpColor = hpPct > 60 ? "#44FF44" : hpPct > 30 ? "#FFAA00" : "#FF4444";
@@ -16,6 +26,13 @@ export function HUD({ player, floor, turn }: HUDProps) {
       <div style={styles.row}>
         <span style={styles.label}>Floor {floor}</span>
         <span style={styles.label}>Turn {turn}</span>
+        <span
+          style={styles.seed}
+          onClick={copySeed}
+          title="Click to copy seed"
+        >
+          {seedCopied ? "Copied!" : `Seed: ${seed}`}
+        </span>
       </div>
 
       <div style={styles.row}>
@@ -38,6 +55,7 @@ export function HUD({ player, floor, turn }: HUDProps) {
         <span>ATK {player.attack}</span>
         <span>DEF {player.defense}</span>
         <span>SPD {player.speed}</span>
+        <span style={{ color: "#FFD700" }}>Gold {player.gold}</span>
       </div>
 
       {player.status_effects.length > 0 && (
@@ -106,5 +124,12 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "#221100",
     padding: "1px 4px",
     borderRadius: "2px",
+  },
+  seed: {
+    marginLeft: "auto",
+    fontSize: "11px",
+    color: "#555",
+    cursor: "pointer",
+    userSelect: "none" as const,
   },
 };

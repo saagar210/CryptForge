@@ -8,6 +8,7 @@ import { MainMenu } from "./components/menu/MainMenu";
 import { HighScores } from "./components/menu/HighScores";
 import { RunHistory } from "./components/menu/RunHistory";
 import { Settings } from "./components/menu/Settings";
+import { Achievements } from "./components/menu/Achievements";
 
 function App() {
   const [screen, setScreen] = useState<AppScreen>("menu");
@@ -89,6 +90,7 @@ function App() {
           onContinue={handleContinue}
           onHighScores={() => setScreen("highscores")}
           onRunHistory={() => setScreen("history")}
+          onAchievements={() => setScreen("achievements")}
           onSettings={() => setScreen("settings")}
         />
       );
@@ -112,6 +114,13 @@ function App() {
           onEquipItem={game.equipItem}
           onLevelUpChoice={handleLevelUp}
           onEscape={handleEscape}
+          onClickMove={game.clickMove}
+          onAutoExplore={game.startAutoExplore}
+          onCancelAutoExplore={game.cancelAutoExplore}
+          onRangedAttack={game.rangedAttack}
+          onInteract={game.interact}
+          onBuyItem={game.buyItem}
+          onSellItem={game.sellItem}
         />
       );
     case "highscores":
@@ -120,6 +129,8 @@ function App() {
       return <RunHistory onBack={handleBackToMenu} />;
     case "settings":
       return <Settings onBack={handleBackToMenu} />;
+    case "achievements":
+      return <Achievements onBack={handleBackToMenu} />;
     default:
       return null;
   }

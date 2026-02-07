@@ -6,10 +6,11 @@ interface MainMenuProps {
   onContinue: () => void;
   onHighScores: () => void;
   onRunHistory: () => void;
+  onAchievements: () => void;
   onSettings: () => void;
 }
 
-export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, onSettings }: MainMenuProps) {
+export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, onAchievements, onSettings }: MainMenuProps) {
   const [hasSave, setHasSave] = useState(false);
   const [seedInput, setSeedInput] = useState("");
   const [showSeed, setShowSeed] = useState(false);
@@ -58,6 +59,9 @@ export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, on
         </button>
         <button style={styles.btnSmall} onClick={onRunHistory}>
           Run History
+        </button>
+        <button style={styles.btnSmall} onClick={onAchievements}>
+          Achievements
         </button>
         <button style={styles.btnSmall} onClick={onSettings}>
           Settings

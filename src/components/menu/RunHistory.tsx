@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { RunSummary } from "../../types/game";
 import { getRunHistory } from "../../lib/api";
 
@@ -8,6 +8,14 @@ interface RunHistoryProps {
 
 export function RunHistory({ onBack }: RunHistoryProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const copySeed = useCallback((seed: string, index: number) => {
+    navigator.clipboard.writeText(seed).then(() => {
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 1500);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     getRunHistory().then(setRuns).catch(() => setRuns([]));
@@ -32,6 +40,15 @@ export function RunHistory({ onBack }: RunHistoryProps) {
               <div style={styles.runDetails}>
                 Floor {run.floor_reached} | Lv{run.level_reached} |
                 {run.enemies_killed} kills | {run.turns_taken} turns
+              </div>
+              <div style={styles.seedRow}>
+                <span style={styles.seedText}>Seed: {run.seed}</span>
+                <button
+                  style={styles.copyBtn}
+                  onClick={() => copySeed(run.seed, i)}
+                >
+                  {copiedIndex === i ? "Copied!" : "Copy"}
+                </button>
               </div>
               {run.cause_of_death && (
                 <div style={styles.cause}>{run.cause_of_death}</div>
@@ -93,6 +110,26 @@ const styles: Record<string, React.CSSProperties> = {
   runDetails: {
     fontSize: "12px",
     color: "#888",
+  },
+  seedRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginTop: "2px",
+  },
+  seedText: {
+    fontSize: "11px",
+    color: "#555",
+  },
+  copyBtn: {
+    padding: "1px 6px",
+    backgroundColor: "#1a1a2e",
+    border: "1px solid #444",
+    borderRadius: "3px",
+    color: "#c0a060",
+    fontFamily: "monospace",
+    fontSize: "10px",
+    cursor: "pointer",
   },
   cause: {
     fontSize: "11px",

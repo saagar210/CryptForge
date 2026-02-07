@@ -57,8 +57,36 @@ function sfxGainValue(): number {
 let ambientSource: AudioBufferSourceNode | null = null;
 let ambientGain: GainNode | null = null;
 
-export function startAmbient(): void {
-  if (ambientSource) return;
+// Biome ambient configs
+interface BiomeAmbientConfig {
+  filterFreq: number;
+  filterType: BiquadFilterType;
+  noiseRate: number; // drip/transient probability
+  brownFactor: number; // random walk step size
+}
+
+const BIOME_AMBIENT: Record<string, BiomeAmbientConfig> = {
+  Dungeon: { filterFreq: 400, filterType: "lowpass", noiseRate: 0.0001, brownFactor: 0.02 },
+  Crypt:   { filterFreq: 300, filterType: "lowpass", noiseRate: 0.00005, brownFactor: 0.015 },
+  Caves:   { filterFreq: 600, filterType: "bandpass", noiseRate: 0.0003, brownFactor: 0.025 },
+  Inferno: { filterFreq: 800, filterType: "lowpass", noiseRate: 0.0005, brownFactor: 0.035 },
+  Abyss:   { filterFreq: 200, filterType: "lowpass", noiseRate: 0.00003, brownFactor: 0.01 },
+};
+
+let currentAmbientBiome = "Dungeon";
+
+export function startAmbient(biome?: string): void {
+  if (ambientSource) {
+    // If biome changed, restart
+    if (biome && biome !== currentAmbientBiome) {
+      stopAmbient();
+    } else {
+      return;
+    }
+  }
+  currentAmbientBiome = biome ?? "Dungeon";
+  const config = BIOME_AMBIENT[currentAmbientBiome] ?? BIOME_AMBIENT.Dungeon!;
+
   const ctx = getCtx();
   const sampleRate = ctx.sampleRate;
   const duration = 4;
@@ -66,13 +94,11 @@ export function startAmbient(): void {
   const buffer = ctx.createBuffer(1, length, sampleRate);
   const data = buffer.getChannelData(0);
 
-  // Brownian noise (filtered random walk) for dungeon ambiance
   let val = 0;
   for (let i = 0; i < length; i++) {
-    val += (Math.random() * 2 - 1) * 0.02;
+    val += (Math.random() * 2 - 1) * config.brownFactor;
     val *= 0.998;
-    // Add occasional drip-like transients
-    if (Math.random() < 0.0001) {
+    if (Math.random() < config.noiseRate) {
       val += (Math.random() - 0.5) * 0.3;
     }
     data[i] = val;
@@ -85,10 +111,9 @@ export function startAmbient(): void {
   );
   ambientGain.connect(ctx.destination);
 
-  // Low-pass filter for muffled underground feel
   const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = 400;
+  filter.type = config.filterType;
+  filter.frequency.value = config.filterFreq;
   filter.connect(ambientGain);
 
   ambientSource = ctx.createBufferSource();
@@ -96,6 +121,12 @@ export function startAmbient(): void {
   ambientSource.loop = true;
   ambientSource.connect(filter);
   ambientSource.start();
+}
+
+export function updateAmbientBiome(biome: string): void {
+  if (biome !== currentAmbientBiome) {
+    startAmbient(biome);
+  }
 }
 
 export function stopAmbient(): void {

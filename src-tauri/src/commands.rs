@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::State;
 
+use crate::engine::achievements;
 use crate::engine::entity::*;
 use crate::engine::state::World;
 use crate::persistence::{config, database, save};
@@ -45,7 +46,15 @@ pub fn player_action(action: PlayerAction, state: State<'_, AppState>) -> Result
     let mut world_lock = state.world.lock().map_err(|e| e.to_string())?;
     let world = world_lock.as_mut().ok_or("No active game")?;
 
-    let result = world.resolve_turn(action);
+    let mut result = world.resolve_turn(action);
+
+    // Check achievements
+    if let Ok(db) = state.db.lock() {
+        let unlocked = achievements::check_achievements(world, &result.events, &db);
+        for name in unlocked {
+            result.events.push(GameEvent::AchievementUnlocked { name });
+        }
+    }
 
     // Auto-save every 10 turns
     if world.turn % 10 == 0 && !world.game_over {
@@ -193,6 +202,44 @@ pub fn update_settings(settings: Settings, state: State<'_, AppState>) -> Result
 pub fn has_save_game(state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     Ok(database::has_save(&db))
+}
+
+#[tauri::command]
+pub fn get_adjacent_shop(state: State<'_, AppState>) -> Result<Option<ShopView>, String> {
+    let world_lock = state.world.lock().map_err(|e| e.to_string())?;
+    let world = world_lock.as_ref().ok_or("No active game")?;
+
+    let player = world.get_entity(world.player_id).ok_or("No player")?;
+    let player_pos = player.position;
+
+    // Check all 8 adjacent tiles + current tile for shops
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if dx == 0 && dy == 0 { continue; }
+            let check_pos = Position::new(player_pos.x + dx, player_pos.y + dy);
+            if let Some(shop_entity) = world.entities.iter().find(|e| e.position == check_pos && e.shop.is_some()) {
+                let shop = shop_entity.shop.as_ref().unwrap();
+                return Ok(Some(ShopView {
+                    shop_id: shop_entity.id,
+                    name: shop_entity.name.clone(),
+                    items: shop.items.iter().map(|item| ShopItemView {
+                        name: item.name.clone(),
+                        price: item.price,
+                        item_type: item.item_type,
+                        slot: item.slot,
+                    }).collect(),
+                }));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+#[tauri::command]
+pub fn get_achievements(state: State<'_, AppState>) -> Result<Vec<achievements::AchievementStatus>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(achievements::get_all_statuses(&db))
 }
 
 #[tauri::command]

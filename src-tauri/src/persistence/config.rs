@@ -15,6 +15,7 @@ pub fn load_settings(conn: &Connection) -> Settings {
     if let Ok(v) = get_setting(conn, "ollama_url") { settings.ollama_url = v; }
     if let Ok(v) = get_setting(conn, "ollama_model") { settings.ollama_model = v; }
     if let Ok(v) = get_setting(conn, "ollama_timeout") { settings.ollama_timeout = v.parse().unwrap_or(3); }
+    if let Ok(v) = get_setting(conn, "tileset_mode") { settings.tileset_mode = v; }
 
     settings
 }
@@ -30,6 +31,7 @@ pub fn save_settings(conn: &Connection, settings: &Settings) -> Result<(), Strin
     set_setting(conn, "ollama_url", &settings.ollama_url)?;
     set_setting(conn, "ollama_model", &settings.ollama_model)?;
     set_setting(conn, "ollama_timeout", &settings.ollama_timeout.to_string())?;
+    set_setting(conn, "tileset_mode", &settings.tileset_mode)?;
     Ok(())
 }
 

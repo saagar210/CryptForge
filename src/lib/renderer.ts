@@ -1,4 +1,5 @@
-import type { VisibleTile, EntityView, Position } from "../types/game";
+import type { VisibleTile, EntityView, Position, Biome } from "../types/game";
+import { isSpriteTileset, getTileSprite, getEntitySprite, drawSprite, BIOME_PALETTES, type BiomePalette } from "./tiles";
 
 const TILE_SIZE = 32;
 
@@ -57,6 +58,8 @@ const ENTITY_GLYPHS: Record<number, string> = {
   0x5E: "^",  // trap
   0x3E: ">",  // stairs down
   0x3C: "<",  // stairs up
+  0x24: "$",  // shopkeeper
+  0x7D: "}",  // bow
 };
 
 export interface Camera {
@@ -86,6 +89,68 @@ export function updateCamera(camera: Camera, playerPos: Position, canvasWidth: n
   if (Math.abs(camera.y - camera.targetY) < 0.01) camera.y = camera.targetY;
 }
 
+export interface HoveredTile {
+  x: number;
+  y: number;
+}
+
+export interface TargetingState {
+  cursor: Position;
+  playerPos: Position;
+  range: number;
+  validTargetIds: number[];
+}
+
+/** Bresenham line from (x0,y0) to (x1,y1) — returns array of points. */
+function bresenhamLine(x0: number, y0: number, x1: number, y1: number): Position[] {
+  const points: Position[] = [];
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+
+  for (;;) {
+    points.push({ x, y });
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+  }
+  return points;
+}
+
+// Screen shake state
+let shakeOffsetX = 0;
+let shakeOffsetY = 0;
+let shakeDecay = 0;
+let shakeStartTime = 0;
+const SHAKE_DURATION = 150;
+
+export function triggerShake(intensity: number): void {
+  shakeOffsetX = (Math.random() - 0.5) * 2 * intensity;
+  shakeOffsetY = (Math.random() - 0.5) * 2 * intensity;
+  shakeDecay = intensity;
+  shakeStartTime = performance.now();
+}
+
+function updateShake(): void {
+  if (shakeDecay <= 0) return;
+  const elapsed = performance.now() - shakeStartTime;
+  if (elapsed >= SHAKE_DURATION) {
+    shakeOffsetX = 0;
+    shakeOffsetY = 0;
+    shakeDecay = 0;
+    return;
+  }
+  const t = elapsed / SHAKE_DURATION;
+  const factor = 1 - t;
+  shakeOffsetX = (Math.random() - 0.5) * 2 * shakeDecay * factor;
+  shakeOffsetY = (Math.random() - 0.5) * 2 * shakeDecay * factor;
+}
+
 export function renderFrame(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -93,10 +158,22 @@ export function renderFrame(
   camera: Camera,
   tiles: VisibleTile[],
   entities: EntityView[],
+  hoveredTile?: HoveredTile | null,
+  biome?: Biome,
+  targeting?: TargetingState | null,
 ): void {
   // Clear
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);
+
+  // Apply screen shake
+  updateShake();
+  ctx.save();
+  ctx.translate(shakeOffsetX, shakeOffsetY);
+
+  // Get biome palette for ASCII mode
+  const palette: BiomePalette = BIOME_PALETTES[biome ?? "Dungeon"] ?? BIOME_PALETTES.Dungeon!;
+  const useSprites = isSpriteTileset();
 
   // Render tiles
   for (const tile of tiles) {
@@ -108,18 +185,34 @@ export function renderFrame(
       continue;
     }
 
-    const baseColor = COLORS[tile.tile_type] ?? COLORS.Floor ?? "#1a1a2e";
+    if (!tile.visible && !tile.explored) continue;
 
-    if (tile.visible) {
-      ctx.fillStyle = baseColor;
-    } else if (tile.explored) {
+    if (!tile.visible) {
       ctx.globalAlpha = EXPLORED_ALPHA;
-      ctx.fillStyle = baseColor;
-    } else {
-      continue;
     }
 
-    ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+    if (useSprites) {
+      const sprite = getTileSprite(tile.tile_type);
+      if (sprite) {
+        drawSprite(ctx, sprite, screenX, screenY, TILE_SIZE);
+      } else {
+        ctx.fillStyle = palette.floor;
+        ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+      }
+    } else {
+      // ASCII mode — use biome palette
+      let color: string;
+      if (tile.tile_type === "Wall") {
+        color = tile.visible ? palette.wall : palette.wallDark;
+      } else if (tile.tile_type === "Floor") {
+        color = tile.visible ? palette.floor : palette.floorDark;
+      } else {
+        color = COLORS[tile.tile_type] ?? palette.floor;
+      }
+      ctx.fillStyle = color;
+      ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+    }
+
     ctx.globalAlpha = 1.0;
   }
 
@@ -141,11 +234,23 @@ export function renderFrame(
       continue;
     }
 
-    const color = ENTITY_COLORS[entity.entity_type] ?? "#FFFFFF";
-    const glyph = ENTITY_GLYPHS[entity.glyph] ?? "?";
-
-    ctx.fillStyle = color;
-    ctx.fillText(glyph, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+    if (useSprites) {
+      const sprite = getEntitySprite(entity.glyph);
+      if (sprite) {
+        drawSprite(ctx, sprite, screenX, screenY, TILE_SIZE);
+      } else {
+        // Fallback to glyph
+        const color = ENTITY_COLORS[entity.entity_type] ?? "#FFFFFF";
+        const glyph = ENTITY_GLYPHS[entity.glyph] ?? "?";
+        ctx.fillStyle = color;
+        ctx.fillText(glyph, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+      }
+    } else {
+      const color = ENTITY_COLORS[entity.entity_type] ?? "#FFFFFF";
+      const glyph = ENTITY_GLYPHS[entity.glyph] ?? "?";
+      ctx.fillStyle = color;
+      ctx.fillText(glyph, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+    }
 
     // HP bar for enemies
     if (entity.entity_type === "Enemy" && entity.hp) {
@@ -162,6 +267,106 @@ export function renderFrame(
       ctx.fillRect(barX, barY, fillWidth, barHeight);
     }
   }
+
+  // Hovered tile outline (skip in targeting mode — targeting draws its own cursor)
+  if (hoveredTile && !targeting) {
+    const hx = (hoveredTile.x - camera.x) * TILE_SIZE;
+    const hy = (hoveredTile.y - camera.y) * TILE_SIZE;
+    ctx.strokeStyle = "#FFD700";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(hx + 1, hy + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+  }
+
+  // Targeting overlay
+  if (targeting) {
+    const { cursor, playerPos, range } = targeting;
+
+    // Dim tiles outside range with subtle blue overlay within range
+    const viewTilesX = Math.ceil(width / TILE_SIZE) + 2;
+    const viewTilesY = Math.ceil(height / TILE_SIZE) + 2;
+    const startTileX = Math.floor(camera.x);
+    const startTileY = Math.floor(camera.y);
+
+    for (let ty = startTileY; ty < startTileY + viewTilesY; ty++) {
+      for (let tx = startTileX; tx < startTileX + viewTilesX; tx++) {
+        const dist = Math.max(Math.abs(tx - playerPos.x), Math.abs(ty - playerPos.y));
+        const sx = (tx - camera.x) * TILE_SIZE;
+        const sy = (ty - camera.y) * TILE_SIZE;
+        if (dist > range) {
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+        } else if (dist > 0) {
+          ctx.globalAlpha = 0.08;
+          ctx.fillStyle = "#4488FF";
+          ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Bresenham LOS line from player to cursor
+    const losLine = bresenhamLine(playerPos.x, playerPos.y, cursor.x, cursor.y);
+    const dist = Math.max(Math.abs(cursor.x - playerPos.x), Math.abs(cursor.y - playerPos.y));
+    const inRange = dist <= range;
+
+    // Check if any wall blocks the line (use tile data)
+    const tileMap = new Map<string, VisibleTile>();
+    for (const t of tiles) {
+      tileMap.set(`${t.x},${t.y}`, t);
+    }
+    let blocked = false;
+    for (let i = 1; i < losLine.length - 1; i++) {
+      const p = losLine[i]!;
+      const t = tileMap.get(`${p.x},${p.y}`);
+      if (t && t.tile_type === "Wall") {
+        blocked = true;
+        break;
+      }
+    }
+    // Also check the target tile itself
+    const targetTile = tileMap.get(`${cursor.x},${cursor.y}`);
+    if (targetTile && targetTile.tile_type === "Wall") {
+      blocked = true;
+    }
+
+    // Draw LOS line tiles (skip player position)
+    for (let i = 1; i < losLine.length; i++) {
+      const p = losLine[i]!;
+      const lx = (p.x - camera.x) * TILE_SIZE;
+      const ly = (p.y - camera.y) * TILE_SIZE;
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = blocked || !inRange ? "#FF4444" : "#44FF44";
+      ctx.fillRect(lx, ly, TILE_SIZE, TILE_SIZE);
+    }
+    ctx.globalAlpha = 1;
+
+    // Crosshair at cursor (blinking)
+    const blink = Math.sin(performance.now() / 150) > 0;
+    if (blink) {
+      const cx = (cursor.x - camera.x) * TILE_SIZE;
+      const cy = (cursor.y - camera.y) * TILE_SIZE;
+      ctx.strokeStyle = blocked || !inRange ? "#FF4444" : "#FFD700";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx + 1, cy + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+
+      // Draw crosshair lines
+      const centerX = cx + TILE_SIZE / 2;
+      const centerY = cy + TILE_SIZE / 2;
+      ctx.beginPath();
+      ctx.moveTo(centerX - 6, centerY);
+      ctx.lineTo(centerX - 2, centerY);
+      ctx.moveTo(centerX + 2, centerY);
+      ctx.lineTo(centerX + 6, centerY);
+      ctx.moveTo(centerX, centerY - 6);
+      ctx.lineTo(centerX, centerY - 2);
+      ctx.moveTo(centerX, centerY + 2);
+      ctx.lineTo(centerX, centerY + 6);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore(); // end shake translate
 }
 
 export function renderMinimap(

@@ -11,3 +11,4 @@ pub mod inventory;
 pub mod items;
 pub mod enemies;
 pub mod level;
+pub mod achievements;

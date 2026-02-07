@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { GameOverInfo } from "../../types/game";
 
 interface DeathScreenProps {
@@ -8,6 +9,14 @@ interface DeathScreenProps {
 
 export function DeathScreen({ info, onNewGame, onMainMenu }: DeathScreenProps) {
   const isVictory = info.run_summary.victory;
+  const [seedCopied, setSeedCopied] = useState(false);
+
+  const copySeed = () => {
+    navigator.clipboard.writeText(info.run_summary.seed).then(() => {
+      setSeedCopied(true);
+      setTimeout(() => setSeedCopied(false), 1500);
+    }).catch(() => {});
+  };
 
   return (
     <div style={styles.container}>
@@ -28,7 +37,15 @@ export function DeathScreen({ info, onNewGame, onMainMenu }: DeathScreenProps) {
         <StatRow label="Enemies" value={info.run_summary.enemies_killed.toString()} />
         <StatRow label="Bosses" value={info.run_summary.bosses_killed.toString()} />
         <StatRow label="Turns" value={info.run_summary.turns_taken.toString()} />
-        <StatRow label="Seed" value={info.run_summary.seed} />
+        <div style={styles.statRow}>
+          <span style={styles.statLabel}>Seed</span>
+          <span style={styles.seedRow}>
+            <span style={styles.statValue}>{info.run_summary.seed}</span>
+            <button style={styles.copyBtn} onClick={copySeed}>
+              {seedCopied ? "Copied!" : "Copy"}
+            </button>
+          </span>
+        </div>
       </div>
 
       <div style={styles.buttons}>
@@ -100,6 +117,21 @@ const styles: Record<string, React.CSSProperties> = {
   buttons: {
     display: "flex",
     gap: "16px",
+  },
+  seedRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  copyBtn: {
+    padding: "2px 8px",
+    backgroundColor: "#1a1a2e",
+    border: "1px solid #555",
+    borderRadius: "3px",
+    color: "#c0a060",
+    fontFamily: "monospace",
+    fontSize: "11px",
+    cursor: "pointer",
   },
   btn: {
     padding: "10px 24px",

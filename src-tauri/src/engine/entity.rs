@@ -25,6 +25,8 @@ pub struct Entity {
     pub stair: Option<StairDirection>,
     pub loot_table: Option<LootTable>,
     pub flavor_text: Option<String>,
+    pub shop: Option<ShopInventory>,
+    pub interactive: Option<Interactive>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -124,6 +126,13 @@ pub struct CombatStats {
     pub base_defense: i32,
     pub base_speed: i32,
     pub crit_chance: f32,
+    pub ranged: Option<RangedStats>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RangedStats {
+    pub range: i32,
+    pub damage_bonus: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +235,8 @@ pub struct ItemProperties {
     pub effect: Option<ItemEffect>,
     pub charges: Option<u32>,
     pub energy_cost: i32,
+    pub ammo_type: Option<AmmoType>,
+    pub ranged: Option<RangedStats>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,6 +251,7 @@ pub enum ItemType {
     Wand,
     Key,
     Food,
+    Projectile,
 }
 
 impl ItemType {
@@ -257,6 +269,13 @@ impl ItemType {
                 | ItemType::Amulet
         )
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AmmoType {
+    Arrow,
+    Bolt,
+    ThrowingKnife,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -365,6 +384,74 @@ pub struct LootEntry {
     pub weight: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShopInventory {
+    pub items: Vec<ShopItem>,
+    pub buy_multiplier: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShopItem {
+    pub name: String,
+    pub price: u32,
+    pub item_type: ItemType,
+    pub slot: Option<EquipSlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShopView {
+    pub shop_id: u32,
+    pub name: String,
+    pub items: Vec<ShopItemView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShopItemView {
+    pub name: String,
+    pub price: u32,
+    pub item_type: ItemType,
+    pub slot: Option<EquipSlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Interactive {
+    pub interaction_type: InteractionType,
+    pub uses_remaining: Option<u32>,
+    pub activated: bool,
+    /// Items contained in chests
+    pub contained_items: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InteractionType {
+    Barrel,
+    Lever,
+    Fountain,
+    Altar,
+    Chest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Biome {
+    Dungeon,
+    Crypt,
+    Caves,
+    Inferno,
+    Abyss,
+}
+
+impl Biome {
+    pub fn for_floor(floor: u32) -> Self {
+        match ((floor - 1) % 10) + 1 {
+            1 | 2 => Biome::Dungeon,
+            3 | 4 => Biome::Crypt,
+            5 | 6 => Biome::Caves,
+            7 | 8 => Biome::Inferno,
+            _ => Biome::Abyss,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EntityType {
     Player,
@@ -373,6 +460,7 @@ pub enum EntityType {
     Door,
     Trap,
     Stairs,
+    Interactive,
 }
 
 // IPC view types — sent to frontend
@@ -393,6 +481,12 @@ pub enum PlayerActionType {
     EquipItem(u32),
     UnequipSlot(EquipSlot),
     LevelUpChoice(LevelUpChoice),
+    ClickMove { x: i32, y: i32 },
+    AutoExplore,
+    RangedAttack { target_id: u32 },
+    BuyItem { shop_id: u32, index: usize },
+    SellItem { index: usize, shop_id: u32 },
+    Interact,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -403,11 +497,22 @@ pub enum LevelUpChoice {
     Speed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AutoExploreInterrupt {
+    EnemySpotted,
+    TookDamage,
+    ItemFound,
+    StairsReached,
+    FullyExplored,
+    NothingReachable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnResult {
     pub state: GameState,
     pub events: Vec<GameEvent>,
     pub game_over: Option<GameOverInfo>,
+    pub auto_explore_interrupt: Option<AutoExploreInterrupt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -420,6 +525,8 @@ pub struct GameState {
     pub messages: Vec<LogMessage>,
     pub minimap: MinimapData,
     pub pending_level_up: bool,
+    pub biome: Biome,
+    pub seed: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -433,6 +540,7 @@ pub struct PlayerState {
     pub level: u32,
     pub xp: u32,
     pub xp_to_next: u32,
+    pub gold: u32,
     pub inventory: Vec<ItemView>,
     pub equipment: EquipmentView,
     pub status_effects: Vec<StatusView>,
@@ -581,6 +689,45 @@ pub enum GameEvent {
         name: String,
         floor: u32,
     },
+    ProjectileFired {
+        from: Position,
+        to: Position,
+        hit: bool,
+    },
+    ItemBought {
+        name: String,
+        price: u32,
+    },
+    ItemSold {
+        name: String,
+        price: u32,
+    },
+    GoldGained {
+        amount: u32,
+    },
+    BarrelSmashed {
+        position: Position,
+        dropped_item: Option<String>,
+    },
+    LeverPulled {
+        position: Position,
+    },
+    FountainUsed {
+        position: Position,
+        effect: String,
+    },
+    ChestOpened {
+        position: Position,
+        items: Vec<String>,
+        trapped: bool,
+    },
+    AltarOffering {
+        item_name: String,
+        stat_gained: String,
+    },
+    AchievementUnlocked {
+        name: String,
+    },
     Victory,
 }
 
@@ -639,6 +786,7 @@ pub struct Settings {
     pub ollama_url: String,
     pub ollama_model: String,
     pub ollama_timeout: u32,
+    pub tileset_mode: String,
 }
 
 impl Default for Settings {
@@ -653,6 +801,7 @@ impl Default for Settings {
             ollama_url: "http://localhost:11434".to_string(),
             ollama_model: "llama3.2".to_string(),
             ollama_timeout: 3,
+            tileset_mode: "ascii".to_string(),
         }
     }
 }

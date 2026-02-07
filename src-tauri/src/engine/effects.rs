@@ -150,6 +150,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                ranged: None,
             }),
             ai: Some(AIBehavior::Melee),
             inventory: None,
@@ -162,6 +163,8 @@ mod tests {
             stair: None,
             loot_table: None,
             flavor_text: None,
+            shop: None,
+            interactive: None,
         }
     }
 

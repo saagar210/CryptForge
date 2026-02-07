@@ -17,6 +17,7 @@ pub fn run() {
             let db_path = app_dir.join("cryptforge.db");
             let conn = persistence::database::open_database(&db_path)
                 .expect("Failed to open database");
+            engine::achievements::ensure_table(&conn);
 
             app.manage(commands::AppState {
                 world: Mutex::new(None),
@@ -38,6 +39,8 @@ pub fn run() {
             commands::update_settings,
             commands::has_save_game,
             commands::check_ollama,
+            commands::get_adjacent_shop,
+            commands::get_achievements,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CryptForge");

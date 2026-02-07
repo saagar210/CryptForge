@@ -8,6 +8,8 @@ import type {
   HighScore,
   Settings,
   OllamaStatus,
+  ShopData,
+  AchievementStatus,
   Direction,
   EquipSlot,
   LevelUpChoice,
@@ -65,6 +67,12 @@ export async function hasSaveGame(): Promise<boolean> {
   return invoke<boolean>("has_save_game");
 }
 
+// --- Shop ---
+
+export async function getAdjacentShop(): Promise<ShopData | null> {
+  return invoke<ShopData | null>("get_adjacent_shop");
+}
+
 // --- Ollama ---
 
 export async function checkOllama(): Promise<OllamaStatus> {
@@ -107,4 +115,32 @@ export function unequipSlotAction(slot: EquipSlot): PlayerAction {
 
 export function levelUpAction(choice: LevelUpChoice): PlayerAction {
   return { action_type: { LevelUpChoice: choice } };
+}
+
+export function clickMoveAction(x: number, y: number): PlayerAction {
+  return { action_type: { ClickMove: { x, y } } };
+}
+
+export function autoExploreAction(): PlayerAction {
+  return { action_type: "AutoExplore" };
+}
+
+export function rangedAttackAction(targetId: number): PlayerAction {
+  return { action_type: { RangedAttack: { target_id: targetId } } };
+}
+
+export function interactAction(): PlayerAction {
+  return { action_type: "Interact" };
+}
+
+export function buyItemAction(shopId: number, index: number): PlayerAction {
+  return { action_type: { BuyItem: { shop_id: shopId, index } } };
+}
+
+export function sellItemAction(index: number, shopId: number): PlayerAction {
+  return { action_type: { SellItem: { index, shop_id: shopId } } };
+}
+
+export async function getAchievements(): Promise<AchievementStatus[]> {
+  return invoke<AchievementStatus[]>("get_achievements");
 }

@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef } from "react";
 import type { Direction, LevelUpChoice } from "../types/game";
 
-export type InputMode = "normal" | "inventory" | "inspect" | "levelup" | "menu";
+export type InputMode = "normal" | "inventory" | "inspect" | "levelup" | "menu" | "targeting";
 
 interface InputActions {
   onMove: (dir: Direction) => void;
@@ -16,6 +16,14 @@ interface InputActions {
   onToggleInventory: () => void;
   onToggleInspect: () => void;
   onEscape: () => void;
+  onCanvasClick?: (tileX: number, tileY: number) => void;
+  onCanvasRightClick?: (tileX: number, tileY: number) => void;
+  onInteract?: () => void;
+  onAutoExplore?: () => void;
+  onEnterTargeting?: () => void;
+  onTargetMove?: (dir: Direction) => void;
+  onTargetCycleNext?: () => void;
+  onTargetConfirm?: () => void;
 }
 
 const KEY_TO_DIRECTION: Record<string, Direction> = {
@@ -34,7 +42,6 @@ const KEY_TO_DIRECTION: Record<string, Direction> = {
   y: "NW", u: "NE", b: "SW", n: "SE",
   // WASD diagonals
   q: "NW", Q: "NW",
-  e: "NE", E: "NE",
   z: "SW", Z: "SW",
   c: "SE", C: "SE",
   // Numpad
@@ -96,6 +103,40 @@ export function useInput(mode: InputMode, actions: InputActions, enabled: boolea
         if (key === "x" || key === "X") {
           event.preventDefault();
           actions.onToggleInspect();
+          return;
+        }
+        if (key === "e" || key === "E") {
+          event.preventDefault();
+          actions.onInteract?.();
+          return;
+        }
+        if (key === "o" || key === "O") {
+          event.preventDefault();
+          actions.onAutoExplore?.();
+          return;
+        }
+        if (key === "f" || key === "F") {
+          event.preventDefault();
+          actions.onEnterTargeting?.();
+          return;
+        }
+      }
+
+      if (mode === "targeting") {
+        const dir = KEY_TO_DIRECTION[key === " " ? "" : key] ?? KEY_TO_DIRECTION[event.code];
+        if (dir) {
+          event.preventDefault();
+          actions.onTargetMove?.(dir);
+          return;
+        }
+        if (key === "Tab") {
+          event.preventDefault();
+          actions.onTargetCycleNext?.();
+          return;
+        }
+        if (key === "Enter" || key === "f" || key === "F") {
+          event.preventDefault();
+          actions.onTargetConfirm?.();
           return;
         }
       }

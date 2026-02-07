@@ -337,4 +337,5 @@ pub enum RoomType {
     Shrine,
     Library,
     Armory,
+    Shop,
 }

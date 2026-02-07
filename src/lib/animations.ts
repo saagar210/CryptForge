@@ -1,13 +1,15 @@
 import type { GameEvent, Position, EntityView } from "../types/game";
+import { triggerShake } from "./renderer";
 
 export interface Animation {
-  type: "damage_number" | "attack_flash" | "death_fade" | "heal_number" | "level_up_flash" | "stairs_fade";
+  type: "damage_number" | "attack_flash" | "death_fade" | "heal_number" | "level_up_flash" | "stairs_fade" | "screen_shake" | "projectile";
   position: Position;
   startTime: number;
   duration: number;
   value?: number;
   color?: string;
   progress: number;
+  targetPosition?: Position;
 }
 
 const ACTIVE: Animation[] = [];
@@ -37,6 +39,10 @@ export function queueAnimationsFromEvents(events: GameEvent[], entities?: Entity
         color: "#FF4444",
         progress: 0,
       });
+      // Shake when player takes damage
+      if (entities?.find((e) => e.id === event.DamageTaken.entity_id)?.entity_type === "Player") {
+        triggerShake(3);
+      }
     } else if ("Attacked" in event) {
       if (event.Attacked.killed) {
         const pos = findPos(event.Attacked.target_id) ?? { x: 0, y: 0 };
@@ -48,6 +54,7 @@ export function queueAnimationsFromEvents(events: GameEvent[], entities?: Entity
           color: "#FF0000",
           progress: 0,
         });
+        triggerShake(2); // Enemy death shake
       }
     } else if ("Healed" in event) {
       const pos = findPos(event.Healed.entity_id) ?? { x: 0, y: 0 };
@@ -77,6 +84,18 @@ export function queueAnimationsFromEvents(events: GameEvent[], entities?: Entity
         duration: 500,
         progress: 0,
       });
+    } else if ("ProjectileFired" in event) {
+      ACTIVE.push({
+        type: "projectile",
+        position: event.ProjectileFired.from,
+        targetPosition: event.ProjectileFired.to,
+        startTime: now,
+        duration: 150,
+        color: "#FFAA00",
+        progress: 0,
+      });
+    } else if ("BossDefeated" in event) {
+      triggerShake(6);
     }
   }
 }
@@ -155,6 +174,22 @@ export function renderAnimations(
         ctx.globalAlpha = fadeProgress;
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, width, height);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case "projectile": {
+        if (!anim.targetPosition) break;
+        const fromX = (anim.position.x - cameraX) * tileSize + tileSize / 2;
+        const fromY = (anim.position.y - cameraY) * tileSize + tileSize / 2;
+        const toX = (anim.targetPosition.x - cameraX) * tileSize + tileSize / 2;
+        const toY = (anim.targetPosition.y - cameraY) * tileSize + tileSize / 2;
+        const px = fromX + (toX - fromX) * anim.progress;
+        const py = fromY + (toY - fromY) * anim.progress;
+        ctx.globalAlpha = 1 - anim.progress * 0.5;
+        ctx.fillStyle = anim.color ?? "#FFAA00";
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fill();
         ctx.globalAlpha = 1;
         break;
       }

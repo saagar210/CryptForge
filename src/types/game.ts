@@ -7,9 +7,9 @@ export interface Position {
 
 export type Direction = "N" | "S" | "E" | "W" | "NE" | "NW" | "SE" | "SW";
 
-export type EntityType = "Player" | "Enemy" | "Item" | "Door" | "Trap" | "Stairs";
+export type EntityType = "Player" | "Enemy" | "Item" | "Door" | "Trap" | "Stairs" | "Interactive";
 
-export type ItemType = "Weapon" | "Armor" | "Shield" | "Ring" | "Amulet" | "Potion" | "Scroll" | "Wand" | "Key" | "Food";
+export type ItemType = "Weapon" | "Armor" | "Shield" | "Ring" | "Amulet" | "Potion" | "Scroll" | "Wand" | "Key" | "Food" | "Projectile";
 
 export type EquipSlot = "MainHand" | "OffHand" | "Head" | "Body" | "Ring" | "Amulet";
 
@@ -42,7 +42,13 @@ export type PlayerActionType =
   | { DropItem: number }
   | { EquipItem: number }
   | { UnequipSlot: EquipSlot }
-  | { LevelUpChoice: LevelUpChoice };
+  | { LevelUpChoice: LevelUpChoice }
+  | { ClickMove: { x: number; y: number } }
+  | "AutoExplore"
+  | { RangedAttack: { target_id: number } }
+  | { BuyItem: { shop_id: number; index: number } }
+  | { SellItem: { index: number; shop_id: number } }
+  | "Interact";
 
 export interface PlayerAction {
   action_type: PlayerActionType;
@@ -50,10 +56,13 @@ export interface PlayerAction {
 
 // --- State types (received from backend) ---
 
+export type AutoExploreInterrupt = "EnemySpotted" | "TookDamage" | "ItemFound" | "StairsReached" | "FullyExplored" | "NothingReachable";
+
 export interface TurnResult {
   state: GameState;
   events: GameEvent[];
   game_over: GameOverInfo | null;
+  auto_explore_interrupt: AutoExploreInterrupt | null;
 }
 
 export interface GameState {
@@ -65,6 +74,8 @@ export interface GameState {
   messages: LogMessage[];
   minimap: MinimapData;
   pending_level_up: boolean;
+  biome: Biome;
+  seed: number;
 }
 
 export interface PlayerState {
@@ -77,6 +88,7 @@ export interface PlayerState {
   level: number;
   xp: number;
   xp_to_next: number;
+  gold: number;
   inventory: ItemView[];
   equipment: EquipmentView;
   status_effects: StatusView[];
@@ -158,6 +170,16 @@ export type GameEvent =
   | { FlavorText: { text: string } }
   | { PlayerDied: { cause: string } }
   | { BossDefeated: { name: string; floor: number } }
+  | { ProjectileFired: { from: Position; to: Position; hit: boolean } }
+  | { ItemBought: { name: string; price: number } }
+  | { ItemSold: { name: string; price: number } }
+  | { GoldGained: { amount: number } }
+  | { BarrelSmashed: { position: Position; dropped_item: string | null } }
+  | { LeverPulled: { position: Position } }
+  | { FountainUsed: { position: Position; effect: string } }
+  | { ChestOpened: { position: Position; items: string[]; trapped: boolean } }
+  | { AltarOffering: { item_name: string; stat_gained: string } }
+  | { AchievementUnlocked: { name: string } }
   | "Victory";
 
 // --- Game over ---
@@ -191,6 +213,19 @@ export interface HighScore {
   victory: boolean;
 }
 
+export interface ShopItem {
+  name: string;
+  price: number;
+  item_type: ItemType;
+  slot: EquipSlot | null;
+}
+
+export interface ShopData {
+  shop_id: number;
+  name: string;
+  items: ShopItem[];
+}
+
 export interface EntityDetail {
   id: number;
   name: string;
@@ -212,6 +247,7 @@ export interface Settings {
   ollama_url: string;
   ollama_model: string;
   ollama_timeout: number;
+  tileset_mode: string;
 }
 
 export interface OllamaStatus {
@@ -222,4 +258,18 @@ export interface OllamaStatus {
 
 // --- App-level types ---
 
-export type AppScreen = "menu" | "game" | "death" | "victory" | "highscores" | "history" | "settings";
+export type Biome = "Dungeon" | "Crypt" | "Caves" | "Inferno" | "Abyss";
+
+export type AchievementCategory = "Exploration" | "Combat" | "Collection" | "Challenge" | "Misc";
+
+export interface AchievementStatus {
+  id: string;
+  name: string;
+  description: string;
+  category: AchievementCategory;
+  target: number;
+  progress: number;
+  unlocked: boolean;
+}
+
+export type AppScreen = "menu" | "game" | "death" | "victory" | "highscores" | "history" | "settings" | "achievements";
