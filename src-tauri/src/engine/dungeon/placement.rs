@@ -1,1 +1,399 @@
-// Entity/item/enemy spawning — populated in Task 4
+use rand::Rng;
+use std::collections::HashSet;
+
+use crate::engine::entity::*;
+use crate::engine::enemies::{all_enemies, boss_templates, apply_endless_scaling, get_boss_for_floor, get_enemy_pool};
+use crate::engine::items::all_items;
+use crate::engine::map::{Map, Room, RoomType, TileType};
+
+static mut NEXT_ENTITY_ID: EntityId = 1;
+
+pub fn next_id() -> EntityId {
+    unsafe {
+        let id = NEXT_ENTITY_ID;
+        NEXT_ENTITY_ID += 1;
+        id
+    }
+}
+
+pub fn reset_id_counter() {
+    unsafe { NEXT_ENTITY_ID = 1; }
+}
+
+pub fn spawn_player(pos: Position) -> Entity {
+    Entity {
+        id: 0, // Player always ID 0
+        name: "Player".to_string(),
+        position: pos,
+        glyph: 0x40, // @
+        render_order: RenderOrder::Player,
+        blocks_movement: true,
+        blocks_fov: false,
+        health: Some(Health::new(50)),
+        combat: Some(CombatStats {
+            base_attack: 5,
+            base_defense: 2,
+            base_speed: 100,
+            crit_chance: 0.05,
+        }),
+        ai: None,
+        inventory: Some(Inventory::new(20)),
+        equipment: Some(EquipmentSlots::empty()),
+        item: None,
+        status_effects: Vec::new(),
+        fov: Some(FieldOfView::new(8)),
+        door: None,
+        trap: None,
+        stair: None,
+        loot_table: None,
+        flavor_text: None,
+    }
+}
+
+pub fn spawn_entities(map: &Map, floor: u32, rng: &mut impl Rng) -> Vec<Entity> {
+    let mut entities = Vec::new();
+    let mut occupied: HashSet<Position> = HashSet::new();
+
+    let enemy_pool = get_enemy_pool(floor);
+    let all_enemy_templates = all_enemies();
+    let all_boss_templates = boss_templates();
+    let all_item_templates = all_items();
+    let boss_name = get_boss_for_floor(floor);
+
+    for room in &map.rooms {
+        let positions = get_floor_positions(map, room);
+        if positions.is_empty() {
+            continue;
+        }
+
+        match room.room_type {
+            RoomType::Start => {
+                // Place a health potion in the start room on floor 1
+                if floor == 1 {
+                    if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                        entities.push(create_item("Health Potion", pos, &all_item_templates));
+                        occupied.insert(pos);
+                    }
+                    if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                        entities.push(create_item("Dagger", pos, &all_item_templates));
+                        occupied.insert(pos);
+                    }
+                }
+            }
+            RoomType::Boss => {
+                // Boss + 1-2 minions
+                if let Some(name) = boss_name {
+                    if let Some(template) = all_boss_templates.iter().find(|t| t.name == name) {
+                        if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                            entities.push(create_enemy_from_template(template, pos, floor));
+                            occupied.insert(pos);
+                        }
+                    }
+                    // 1-2 minions
+                    let minion_count = rng.gen_range(1..=2);
+                    for _ in 0..minion_count {
+                        if let Some(enemy_name) = enemy_pool.get(rng.gen_range(0..enemy_pool.len())) {
+                            if let Some(template) = all_enemy_templates.iter().find(|t| t.name == *enemy_name) {
+                                if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                                    entities.push(create_enemy_from_template(template, pos, floor));
+                                    occupied.insert(pos);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Place locked door (handled separately in map)
+            }
+            RoomType::Treasure => {
+                // 3-5 items
+                let item_count = rng.gen_range(3..=5);
+                for _ in 0..item_count {
+                    if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                        if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
+                            entities.push(item.with_position(pos));
+                            occupied.insert(pos);
+                        }
+                    }
+                }
+                // 1 enemy guarding
+                if let Some(enemy_name) = enemy_pool.get(rng.gen_range(0..enemy_pool.len())) {
+                    if let Some(template) = all_enemy_templates.iter().find(|t| t.name == *enemy_name) {
+                        if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                            entities.push(create_enemy_from_template(template, pos, floor));
+                            occupied.insert(pos);
+                        }
+                    }
+                }
+            }
+            RoomType::Library | RoomType::Armory => {
+                // 2-3 items
+                let item_count = rng.gen_range(2..=3);
+                for _ in 0..item_count {
+                    if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                        if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
+                            entities.push(item.with_position(pos));
+                            occupied.insert(pos);
+                        }
+                    }
+                }
+            }
+            RoomType::Shrine => {
+                // 1 good item
+                if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                    if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
+                        entities.push(item.with_position(pos));
+                        occupied.insert(pos);
+                    }
+                }
+            }
+            RoomType::Normal => {
+                // Enemies: floor/2 + rng(1,3)
+                let enemy_count = (floor as i32 / 2 + rng.gen_range(1..=3)).min(positions.len() as i32 / 2);
+                for _ in 0..enemy_count {
+                    if let Some(enemy_name) = enemy_pool.get(rng.gen_range(0..enemy_pool.len())) {
+                        if let Some(template) = all_enemy_templates.iter().find(|t| t.name == *enemy_name) {
+                            if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                                entities.push(create_enemy_from_template(template, pos, floor));
+                                occupied.insert(pos);
+                            }
+                        }
+                    }
+                }
+                // 30% chance of an item
+                if rng.gen::<f32>() < 0.30 {
+                    if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                        if let Some(item) = pick_weighted_item(floor, rng, &all_item_templates) {
+                            entities.push(item.with_position(pos));
+                            occupied.insert(pos);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Place 1-3 traps
+    let trap_count = rng.gen_range(1..=3);
+    let all_floor_positions: Vec<Position> = (0..map.width as i32)
+        .flat_map(|x| (0..map.height as i32).map(move |y| Position::new(x, y)))
+        .filter(|p| map.get_tile(p.x, p.y) == TileType::Floor && !occupied.contains(p))
+        .collect();
+
+    for _ in 0..trap_count {
+        if let Some(pos) = pick_free_pos(&all_floor_positions, &occupied, rng) {
+            let trap_type = match rng.gen_range(0..4) {
+                0 => TrapType::Spike { damage: 5 + floor as i32 },
+                1 => TrapType::Poison { damage: 2, duration: 3 },
+                2 => TrapType::Teleport,
+                _ => TrapType::Alarm,
+            };
+            entities.push(Entity {
+                id: next_id(),
+                name: "Trap".to_string(),
+                position: pos,
+                glyph: 0x5E,
+                render_order: RenderOrder::Trap,
+                blocks_movement: false,
+                blocks_fov: false,
+                health: None,
+                combat: None,
+                ai: None,
+                inventory: None,
+                equipment: None,
+                item: None,
+                status_effects: Vec::new(),
+                fov: None,
+                door: None,
+                trap: Some(TrapProperties {
+                    trap_type,
+                    revealed: false,
+                    triggered: false,
+                }),
+                stair: None,
+                loot_table: None,
+                flavor_text: None,
+            });
+            occupied.insert(pos);
+        }
+    }
+
+    // Place boss key on boss floors (in a non-boss, non-start room)
+    if boss_name.is_some() {
+        let key_rooms: Vec<&Room> = map.rooms.iter()
+            .filter(|r| r.room_type != RoomType::Boss && r.room_type != RoomType::Start)
+            .collect();
+        if let Some(key_room) = key_rooms.get(rng.gen_range(0..key_rooms.len().max(1))) {
+            let positions = get_floor_positions(map, key_room);
+            if let Some(pos) = pick_free_pos(&positions, &occupied, rng) {
+                entities.push(create_item("Boss Key", pos, &all_item_templates));
+                occupied.insert(pos);
+            }
+        }
+    }
+
+    entities
+}
+
+fn get_floor_positions(map: &Map, room: &Room) -> Vec<Position> {
+    let mut positions = Vec::new();
+    for y in room.y..(room.y + room.height) {
+        for x in room.x..(room.x + room.width) {
+            if map.in_bounds(x, y) && map.get_tile(x, y) == TileType::Floor {
+                positions.push(Position::new(x, y));
+            }
+        }
+    }
+    positions
+}
+
+fn pick_free_pos(
+    positions: &[Position],
+    occupied: &HashSet<Position>,
+    rng: &mut impl Rng,
+) -> Option<Position> {
+    let free: Vec<Position> = positions.iter().filter(|p| !occupied.contains(p)).cloned().collect();
+    if free.is_empty() {
+        return None;
+    }
+    Some(free[rng.gen_range(0..free.len())])
+}
+
+fn create_enemy_from_template(
+    template: &crate::engine::enemies::EnemyTemplate,
+    pos: Position,
+    floor: u32,
+) -> Entity {
+    let (hp, attack, defense) = apply_endless_scaling(template, floor);
+    Entity {
+        id: next_id(),
+        name: template.name.to_string(),
+        position: pos,
+        glyph: template.glyph,
+        render_order: RenderOrder::Enemy,
+        blocks_movement: true,
+        blocks_fov: false,
+        health: Some(Health::new(hp)),
+        combat: Some(CombatStats {
+            base_attack: attack,
+            base_defense: defense,
+            base_speed: template.speed,
+            crit_chance: template.crit_chance,
+        }),
+        ai: Some(template.ai.clone()),
+        inventory: None,
+        equipment: None,
+        item: None,
+        status_effects: Vec::new(),
+        fov: Some(FieldOfView::new(6)),
+        door: None,
+        trap: None,
+        stair: None,
+        loot_table: None,
+        flavor_text: None,
+    }
+}
+
+fn create_item(
+    name: &str,
+    pos: Position,
+    templates: &[crate::engine::items::ItemTemplate],
+) -> Entity {
+    let template = templates.iter().find(|t| t.name == name);
+    let t = template.unwrap();
+    Entity {
+        id: next_id(),
+        name: t.name.to_string(),
+        position: pos,
+        glyph: t.glyph,
+        render_order: RenderOrder::Item,
+        blocks_movement: false,
+        blocks_fov: false,
+        health: None,
+        combat: None,
+        ai: None,
+        inventory: None,
+        equipment: None,
+        item: Some(ItemProperties {
+            item_type: t.item_type,
+            slot: t.slot,
+            power: t.power,
+            effect: t.effect.clone(),
+            charges: t.charges,
+            energy_cost: t.energy_cost,
+        }),
+        status_effects: Vec::new(),
+        fov: None,
+        door: None,
+        trap: None,
+        stair: None,
+        loot_table: None,
+        flavor_text: None,
+    }
+}
+
+struct ItemWithPosition {
+    entity: Entity,
+}
+
+impl ItemWithPosition {
+    fn with_position(mut self, pos: Position) -> Entity {
+        self.entity.position = pos;
+        self.entity
+    }
+}
+
+fn pick_weighted_item(
+    floor: u32,
+    rng: &mut impl Rng,
+    templates: &[crate::engine::items::ItemTemplate],
+) -> Option<ItemWithPosition> {
+    let eligible: Vec<&crate::engine::items::ItemTemplate> = templates
+        .iter()
+        .filter(|t| t.min_floor <= floor && t.item_type != ItemType::Key)
+        .collect();
+
+    if eligible.is_empty() {
+        return None;
+    }
+
+    let total_weight: u32 = eligible.iter().map(|t| t.rarity.weight()).sum();
+    let mut roll = rng.gen_range(0..total_weight);
+
+    for t in &eligible {
+        let w = t.rarity.weight();
+        if roll < w {
+            let entity = Entity {
+                id: next_id(),
+                name: t.name.to_string(),
+                position: Position::new(0, 0),
+                glyph: t.glyph,
+                render_order: RenderOrder::Item,
+                blocks_movement: false,
+                blocks_fov: false,
+                health: None,
+                combat: None,
+                ai: None,
+                inventory: None,
+                equipment: None,
+                item: Some(ItemProperties {
+                    item_type: t.item_type,
+                    slot: t.slot,
+                    power: t.power,
+                    effect: t.effect.clone(),
+                    charges: t.charges,
+                    energy_cost: t.energy_cost,
+                }),
+                status_effects: Vec::new(),
+                fov: None,
+                door: None,
+                trap: None,
+                stair: None,
+                loot_table: None,
+                flavor_text: None,
+            };
+            return Some(ItemWithPosition { entity });
+        }
+        roll -= w;
+    }
+    None
+}

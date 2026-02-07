@@ -1,1 +1,334 @@
-// Item definitions, loot tables — populated in Task 4
+use crate::engine::entity::*;
+
+pub struct ItemTemplate {
+    pub name: &'static str,
+    pub glyph: u32,
+    pub item_type: ItemType,
+    pub slot: Option<EquipSlot>,
+    pub power: i32,
+    pub speed_mod: i32,
+    pub effect: Option<ItemEffect>,
+    pub charges: Option<u32>,
+    pub energy_cost: i32,
+    pub min_floor: u32,
+    pub rarity: Rarity,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Rarity {
+    Common,
+    Uncommon,
+    Rare,
+    VeryRare,
+}
+
+impl Rarity {
+    pub fn weight(&self) -> u32 {
+        match self {
+            Rarity::Common => 10,
+            Rarity::Uncommon => 5,
+            Rarity::Rare => 2,
+            Rarity::VeryRare => 1,
+        }
+    }
+}
+
+pub fn all_items() -> Vec<ItemTemplate> {
+    vec![
+        // Weapons
+        ItemTemplate {
+            name: "Dagger", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 2, speed_mod: 20,
+            effect: None, charges: None, energy_cost: 100,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Short Sword", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 4, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 100,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Mace", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 5, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Stunned, duration: 1 }),
+            charges: None, energy_cost: 100,
+            min_floor: 2, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Long Sword", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 7, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 100,
+            min_floor: 3, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "War Axe", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 9, speed_mod: -10,
+            effect: None, charges: None, energy_cost: 100,
+            min_floor: 5, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Great Sword", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 11, speed_mod: -20,
+            effect: None, charges: None, energy_cost: 100,
+            min_floor: 7, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Poison Dagger", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 3, speed_mod: 20,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Poison, duration: 4 }),
+            charges: None, energy_cost: 100,
+            min_floor: 4, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Flame Blade", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 8, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Burning, duration: 3 }),
+            charges: None, energy_cost: 100,
+            min_floor: 6, rarity: Rarity::VeryRare,
+        },
+        ItemTemplate {
+            name: "Frost Brand", glyph: 0x2F, item_type: ItemType::Weapon,
+            slot: Some(EquipSlot::MainHand), power: 8, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Slowed, duration: 3 }),
+            charges: None, energy_cost: 100,
+            min_floor: 6, rarity: Rarity::VeryRare,
+        },
+
+        // Armor - Head
+        ItemTemplate {
+            name: "Leather Cap", glyph: 0x5E, item_type: ItemType::Armor,
+            slot: Some(EquipSlot::Head), power: 1, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Iron Helm", glyph: 0x5E, item_type: ItemType::Armor,
+            slot: Some(EquipSlot::Head), power: 3, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 4, rarity: Rarity::Uncommon,
+        },
+
+        // Armor - Body
+        ItemTemplate {
+            name: "Leather Armor", glyph: 0x5B, item_type: ItemType::Armor,
+            slot: Some(EquipSlot::Body), power: 2, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Chain Mail", glyph: 0x5B, item_type: ItemType::Armor,
+            slot: Some(EquipSlot::Body), power: 4, speed_mod: -10,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 3, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Plate Armor", glyph: 0x5B, item_type: ItemType::Armor,
+            slot: Some(EquipSlot::Body), power: 7, speed_mod: -20,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 6, rarity: Rarity::Rare,
+        },
+
+        // Shields
+        ItemTemplate {
+            name: "Wooden Shield", glyph: 0x29, item_type: ItemType::Shield,
+            slot: Some(EquipSlot::OffHand), power: 1, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Iron Shield", glyph: 0x29, item_type: ItemType::Shield,
+            slot: Some(EquipSlot::OffHand), power: 3, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 3, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Tower Shield", glyph: 0x29, item_type: ItemType::Shield,
+            slot: Some(EquipSlot::OffHand), power: 5, speed_mod: -10,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 6, rarity: Rarity::Rare,
+        },
+
+        // Accessories - Rings
+        ItemTemplate {
+            name: "Ring of Strength", glyph: 0x3D, item_type: ItemType::Ring,
+            slot: Some(EquipSlot::Ring), power: 2, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 3, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Ring of Protection", glyph: 0x3D, item_type: ItemType::Ring,
+            slot: Some(EquipSlot::Ring), power: 2, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 3, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Ring of Haste", glyph: 0x3D, item_type: ItemType::Ring,
+            slot: Some(EquipSlot::Ring), power: 0, speed_mod: 20,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 5, rarity: Rarity::VeryRare,
+        },
+        ItemTemplate {
+            name: "Ring of Regeneration", glyph: 0x3D, item_type: ItemType::Ring,
+            slot: Some(EquipSlot::Ring), power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Regenerating, duration: 999 }),
+            charges: None, energy_cost: 50,
+            min_floor: 6, rarity: Rarity::VeryRare,
+        },
+
+        // Accessories - Amulets
+        ItemTemplate {
+            name: "Amulet of Health", glyph: 0x22, item_type: ItemType::Amulet,
+            slot: Some(EquipSlot::Amulet), power: 20, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 3, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Amulet of Vision", glyph: 0x22, item_type: ItemType::Amulet,
+            slot: Some(EquipSlot::Amulet), power: 3, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 4, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Amulet of Resistance", glyph: 0x22, item_type: ItemType::Amulet,
+            slot: Some(EquipSlot::Amulet), power: 0, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 6, rarity: Rarity::VeryRare,
+        },
+
+        // Consumables - Potions
+        ItemTemplate {
+            name: "Health Potion", glyph: 0x21, item_type: ItemType::Potion,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::Heal(25)), charges: None, energy_cost: 100,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Greater Health Potion", glyph: 0x21, item_type: ItemType::Potion,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::Heal(50)), charges: None, energy_cost: 100,
+            min_floor: 4, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Potion of Strength", glyph: 0x21, item_type: ItemType::Potion,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Weakened, duration: 20 }),
+            charges: None, energy_cost: 100,
+            min_floor: 3, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Potion of Speed", glyph: 0x21, item_type: ItemType::Potion,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Hasted, duration: 15 }),
+            charges: None, energy_cost: 100,
+            min_floor: 3, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Potion of Invisibility", glyph: 0x21, item_type: ItemType::Potion,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Invisible, duration: 10 }),
+            charges: None, energy_cost: 100,
+            min_floor: 5, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Antidote", glyph: 0x21, item_type: ItemType::Potion,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::CureStatus), charges: None, energy_cost: 100,
+            min_floor: 2, rarity: Rarity::Common,
+        },
+
+        // Scrolls
+        ItemTemplate {
+            name: "Scroll of Reveal", glyph: 0x3F, item_type: ItemType::Scroll,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::RevealMap), charges: None, energy_cost: 100,
+            min_floor: 2, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Scroll of Teleport", glyph: 0x3F, item_type: ItemType::Scroll,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::Teleport), charges: None, energy_cost: 100,
+            min_floor: 3, rarity: Rarity::Uncommon,
+        },
+        ItemTemplate {
+            name: "Scroll of Fireball", glyph: 0x3F, item_type: ItemType::Scroll,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::DamageArea { damage: 20, radius: 3 }),
+            charges: None, energy_cost: 100,
+            min_floor: 5, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Scroll of Confusion", glyph: 0x3F, item_type: ItemType::Scroll,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Confused, duration: 5 }),
+            charges: None, energy_cost: 100,
+            min_floor: 4, rarity: Rarity::Uncommon,
+        },
+
+        // Food
+        ItemTemplate {
+            name: "Food Ration", glyph: 0x25, item_type: ItemType::Food,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::Heal(15)), charges: None, energy_cost: 100,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+
+        // Wands
+        ItemTemplate {
+            name: "Wand of Fire", glyph: 0x7C, item_type: ItemType::Wand,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::RangedAttack {
+                damage: 8,
+                status: Some((StatusType::Burning, 3)),
+            }),
+            charges: Some(8), energy_cost: 100,
+            min_floor: 4, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Wand of Ice", glyph: 0x7C, item_type: ItemType::Wand,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::RangedAttack {
+                damage: 8,
+                status: Some((StatusType::Slowed, 3)),
+            }),
+            charges: Some(8), energy_cost: 100,
+            min_floor: 4, rarity: Rarity::Rare,
+        },
+        ItemTemplate {
+            name: "Wand of Lightning", glyph: 0x7C, item_type: ItemType::Wand,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::RangedAttack {
+                damage: 12,
+                status: None,
+            }),
+            charges: Some(5), energy_cost: 100,
+            min_floor: 6, rarity: Rarity::VeryRare,
+        },
+
+        // Keys
+        ItemTemplate {
+            name: "Iron Key", glyph: 0x7E, item_type: ItemType::Key,
+            slot: None, power: 0, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 1, rarity: Rarity::Common,
+        },
+        ItemTemplate {
+            name: "Boss Key", glyph: 0x7E, item_type: ItemType::Key,
+            slot: None, power: 0, speed_mod: 0,
+            effect: None, charges: None, energy_cost: 50,
+            min_floor: 3, rarity: Rarity::Common,
+        },
+    ]
+}
+
+pub fn get_loot_pool(floor: u32) -> Vec<&'static str> {
+    let all = all_items();
+    all.iter()
+        .filter(|t| t.min_floor <= floor && t.item_type != ItemType::Key)
+        .map(|t| t.name)
+        .collect()
+}
+
+pub fn find_template(name: &str) -> Option<ItemTemplate> {
+    all_items().into_iter().find(|t| t.name == name)
+}
