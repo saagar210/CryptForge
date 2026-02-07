@@ -115,6 +115,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -131,6 +132,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         }
     }
 
@@ -158,6 +161,9 @@ mod tests {
                 energy_cost: 100,
                 ammo_type: None,
                 ranged: None,
+                hunger_restore: 0,
+                enchant_level: 0,
+                identified: true,
             }),
             status_effects: Vec::new(),
             fov: None,
@@ -168,6 +174,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         }
     }
 

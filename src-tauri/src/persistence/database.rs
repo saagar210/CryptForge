@@ -1,8 +1,9 @@
 use rusqlite::{Connection, params};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[allow(dead_code)]
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Open (or create) the database at the given path and run migrations.
 pub fn open_database(path: &Path) -> Result<Connection, String> {
@@ -35,6 +36,9 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
 
     if current_version < 1 {
         migrate_v1(conn)?;
+    }
+    if current_version < 2 {
+        migrate_v2(conn)?;
     }
 
     Ok(())
@@ -81,6 +85,32 @@ fn migrate_v1(conn: &Connection) -> Result<(), String> {
 
         INSERT OR REPLACE INTO schema_version (version) VALUES (1);"
     ).map_err(|e| format!("Migration v1 error: {}", e))?;
+
+    Ok(())
+}
+
+fn migrate_v2(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "ALTER TABLE runs ADD COLUMN class TEXT DEFAULT 'Warrior';
+         ALTER TABLE runs ADD COLUMN modifiers TEXT DEFAULT '[]';
+         ALTER TABLE high_scores ADD COLUMN class TEXT DEFAULT 'Warrior';
+
+         CREATE TABLE IF NOT EXISTS daily_challenges (
+             date TEXT PRIMARY KEY,
+             seed TEXT NOT NULL,
+             score INTEGER,
+             floor_reached INTEGER,
+             completed INTEGER NOT NULL DEFAULT 0,
+             timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+
+         CREATE TABLE IF NOT EXISTS lifetime_stats (
+             key TEXT PRIMARY KEY,
+             value INTEGER NOT NULL DEFAULT 0
+         );
+
+         INSERT OR REPLACE INTO schema_version (version) VALUES (2);"
+    ).map_err(|e| format!("Migration v2 error: {}", e))?;
 
     Ok(())
 }
@@ -135,18 +165,21 @@ pub fn record_run(
     score: u32,
     cause_of_death: Option<&str>,
     victory: bool,
+    class: &str,
+    modifiers: &[String],
 ) -> Result<(), String> {
+    let modifiers_json = serde_json::to_string(modifiers).unwrap_or_else(|_| "[]".to_string());
     conn.execute(
-        "INSERT INTO runs (seed, floor_reached, enemies_killed, bosses_killed, level_reached, turns_taken, score, cause_of_death, victory)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![seed, floor_reached, enemies_killed, bosses_killed, level_reached, turns_taken, score, cause_of_death, victory as i32],
+        "INSERT INTO runs (seed, floor_reached, enemies_killed, bosses_killed, level_reached, turns_taken, score, cause_of_death, victory, class, modifiers)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![seed, floor_reached, enemies_killed, bosses_killed, level_reached, turns_taken, score, cause_of_death, victory as i32, class, modifiers_json],
     ).map_err(|e| format!("Record run error: {}", e))?;
 
     // Also insert into high_scores
     conn.execute(
-        "INSERT INTO high_scores (score, floor_reached, seed, victory)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![score, floor_reached, seed, victory as i32],
+        "INSERT INTO high_scores (score, floor_reached, seed, victory, class)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![score, floor_reached, seed, victory as i32, class],
     ).map_err(|e| format!("Record high score error: {}", e))?;
 
     // Keep only top 10 high scores
@@ -161,7 +194,7 @@ pub fn record_run(
 /// Get top 10 high scores.
 pub fn get_high_scores(conn: &Connection) -> Result<Vec<crate::engine::entity::HighScore>, String> {
     let mut stmt = conn
-        .prepare("SELECT score, floor_reached, seed, victory, timestamp FROM high_scores ORDER BY score DESC LIMIT 10")
+        .prepare("SELECT score, floor_reached, seed, victory, timestamp, COALESCE(class, 'Warrior') FROM high_scores ORDER BY score DESC LIMIT 10")
         .map_err(|e| format!("Query error: {}", e))?;
 
     let scores = stmt
@@ -173,6 +206,7 @@ pub fn get_high_scores(conn: &Connection) -> Result<Vec<crate::engine::entity::H
                 seed: row.get(2)?,
                 victory: row.get::<_, i32>(3)? != 0,
                 timestamp: row.get(4)?,
+                class: row.get(5)?,
             })
         })
         .map_err(|e| format!("Query error: {}", e))?
@@ -190,11 +224,13 @@ pub fn get_high_scores(conn: &Connection) -> Result<Vec<crate::engine::entity::H
 /// Get run history (most recent 50).
 pub fn get_run_history(conn: &Connection) -> Result<Vec<crate::engine::entity::RunSummary>, String> {
     let mut stmt = conn
-        .prepare("SELECT seed, floor_reached, enemies_killed, bosses_killed, level_reached, turns_taken, score, cause_of_death, victory, timestamp FROM runs ORDER BY id DESC LIMIT 50")
+        .prepare("SELECT seed, floor_reached, enemies_killed, bosses_killed, level_reached, turns_taken, score, cause_of_death, victory, timestamp, COALESCE(class, 'Warrior'), COALESCE(modifiers, '[]') FROM runs ORDER BY id DESC LIMIT 50")
         .map_err(|e| format!("Query error: {}", e))?;
 
     let runs = stmt
         .query_map([], |row| {
+            let modifiers_json: String = row.get(11)?;
+            let modifiers: Vec<String> = serde_json::from_str(&modifiers_json).unwrap_or_default();
             Ok(crate::engine::entity::RunSummary {
                 seed: row.get(0)?,
                 floor_reached: row.get(1)?,
@@ -206,6 +242,8 @@ pub fn get_run_history(conn: &Connection) -> Result<Vec<crate::engine::entity::R
                 cause_of_death: row.get(7)?,
                 victory: row.get::<_, i32>(8)? != 0,
                 timestamp: row.get(9)?,
+                class: row.get(10)?,
+                modifiers,
             })
         })
         .map_err(|e| format!("Query error: {}", e))?
@@ -213,6 +251,90 @@ pub fn get_run_history(conn: &Connection) -> Result<Vec<crate::engine::entity::R
         .collect();
 
     Ok(runs)
+}
+
+/// Increment a lifetime stat by the given amount (UPSERT).
+pub fn increment_stat(conn: &Connection, key: &str, amount: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO lifetime_stats (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = value + ?2",
+        params![key, amount],
+    )
+    .map_err(|e| format!("Increment stat error: {}", e))?;
+    Ok(())
+}
+
+/// Read all lifetime stats as a HashMap.
+pub fn get_all_stats(conn: &Connection) -> Result<HashMap<String, i64>, String> {
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM lifetime_stats")
+        .map_err(|e| format!("Query error: {}", e))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| format!("Query error: {}", e))?;
+
+    let mut map = HashMap::new();
+    for row in rows {
+        if let Ok((k, v)) = row {
+            map.insert(k, v);
+        }
+    }
+    Ok(map)
+}
+
+/// Check if a daily challenge has been played for the given date.
+pub fn has_played_daily(conn: &Connection, date: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM daily_challenges WHERE date = ?1",
+        params![date],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap_or(0) > 0
+}
+
+/// Record a daily challenge result.
+pub fn record_daily_result(
+    conn: &Connection,
+    date: &str,
+    seed: &str,
+    score: u32,
+    floor_reached: u32,
+    completed: bool,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO daily_challenges (date, seed, score, floor_reached, completed, timestamp)
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+        params![date, seed, score, floor_reached, completed as i32],
+    )
+    .map_err(|e| format!("Record daily result error: {}", e))?;
+    Ok(())
+}
+
+/// Get the daily challenge status for today's date.
+pub fn get_daily_status(conn: &Connection, date: &str) -> crate::engine::entity::DailyStatus {
+    let result = conn.query_row(
+        "SELECT score, floor_reached FROM daily_challenges WHERE date = ?1",
+        params![date],
+        |row| Ok((row.get::<_, Option<u32>>(0)?, row.get::<_, Option<u32>>(1)?)),
+    );
+
+    match result {
+        Ok((score, floor_reached)) => crate::engine::entity::DailyStatus {
+            date: date.to_string(),
+            played: true,
+            score,
+            floor_reached,
+        },
+        Err(_) => crate::engine::entity::DailyStatus {
+            date: date.to_string(),
+            played: false,
+            score: None,
+            floor_reached: None,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -259,7 +381,7 @@ mod tests {
     #[test]
     fn record_run_and_history() {
         let conn = test_db();
-        record_run(&conn, "42", 5, 10, 1, 3, 50, 1250, Some("Slain by goblin"), false).unwrap();
+        record_run(&conn, "42", 5, 10, 1, 3, 50, 1250, Some("Slain by goblin"), false, "Warrior", &[]).unwrap();
         let runs = get_run_history(&conn).unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].floor_reached, 5);
@@ -270,9 +392,9 @@ mod tests {
     #[test]
     fn high_scores_ranked() {
         let conn = test_db();
-        record_run(&conn, "1", 1, 5, 0, 1, 20, 500, None, false).unwrap();
-        record_run(&conn, "2", 3, 15, 0, 2, 50, 1500, None, false).unwrap();
-        record_run(&conn, "3", 10, 50, 3, 5, 200, 5000, None, true).unwrap();
+        record_run(&conn, "1", 1, 5, 0, 1, 20, 500, None, false, "Warrior", &[]).unwrap();
+        record_run(&conn, "2", 3, 15, 0, 2, 50, 1500, None, false, "Rogue", &[]).unwrap();
+        record_run(&conn, "3", 10, 50, 3, 5, 200, 5000, None, true, "Mage", &[]).unwrap();
 
         let scores = get_high_scores(&conn).unwrap();
         assert_eq!(scores.len(), 3);
@@ -286,7 +408,7 @@ mod tests {
     fn high_scores_pruned_to_10() {
         let conn = test_db();
         for i in 0..15u32 {
-            record_run(&conn, &i.to_string(), 1, i, 0, 1, 10, i * 100, None, false).unwrap();
+            record_run(&conn, &i.to_string(), 1, i, 0, 1, 10, i * 100, None, false, "Warrior", &[]).unwrap();
         }
         let scores = get_high_scores(&conn).unwrap();
         assert_eq!(scores.len(), 10);

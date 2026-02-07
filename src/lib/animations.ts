@@ -1,5 +1,6 @@
 import type { GameEvent, Position, EntityView } from "../types/game";
 import { triggerShake } from "./renderer";
+import { spawnParticles } from "./particles";
 
 export interface Animation {
   type: "damage_number" | "attack_flash" | "death_fade" | "heal_number" | "level_up_flash" | "stairs_fade" | "screen_shake" | "projectile";
@@ -46,15 +47,27 @@ export function queueAnimationsFromEvents(events: GameEvent[], entities?: Entity
     } else if ("Attacked" in event) {
       if (event.Attacked.killed) {
         const pos = findPos(event.Attacked.target_id) ?? { x: 0, y: 0 };
+        const dmgType = event.Attacked.damage_type ?? "physical";
+        let color = "#FF0000";
+        if (dmgType === "fire") {
+          color = "#FF6600";
+          spawnParticles("ember", pos.x, pos.y, 30);
+        } else if (dmgType === "poison") {
+          color = "#33FF33";
+          spawnParticles("puff", pos.x, pos.y, 25);
+        } else if (dmgType === "ice") {
+          color = "#88CCFF";
+          spawnParticles("ice", pos.x, pos.y, 15);
+        }
         ACTIVE.push({
           type: "death_fade",
           position: pos,
           startTime: now,
           duration: 300,
-          color: "#FF0000",
+          color,
           progress: 0,
         });
-        triggerShake(2); // Enemy death shake
+        triggerShake(2);
       }
     } else if ("Healed" in event) {
       const pos = findPos(event.Healed.entity_id) ?? { x: 0, y: 0 };

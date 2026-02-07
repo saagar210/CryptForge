@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from "react";
 import type { GameState, GameEvent } from "../../types/game";
 import { createCamera, updateCamera, renderFrame, type Camera, type HoveredTile, type TargetingState } from "../../lib/renderer";
 import { queueAnimationsFromEvents, updateAnimations, renderAnimations } from "../../lib/animations";
+import { updateParticles, renderParticles, queueParticlesFromEvents, queueParticlesFromStatus } from "../../lib/particles";
 
 const TILE_SIZE = 32;
 
@@ -31,6 +32,7 @@ export function GameCanvas({ gameState, events, onCanvasClick, onCanvasRightClic
     if (events !== prevEventsRef.current && events.length > 0) {
       prevEventsRef.current = events;
       queueAnimationsFromEvents(events, gameState.visible_entities);
+      queueParticlesFromEvents(events, gameState.visible_entities);
     }
   }, [events, gameState.visible_entities]);
 
@@ -106,6 +108,11 @@ export function GameCanvas({ gameState, events, onCanvasClick, onCanvasRightClic
         state.biome,
         targetingRef.current,
       );
+
+      // Update and render particles
+      queueParticlesFromStatus(state.visible_entities);
+      updateParticles(1 / 60);
+      renderParticles(ctx, cameraRef.current.x, cameraRef.current.y, 32);
 
       // Render animations on top
       updateAnimations();

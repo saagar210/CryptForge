@@ -11,6 +11,8 @@ import { Minimap } from "./Minimap";
 import { InventoryPanel } from "./InventoryPanel";
 import { LevelUpModal } from "./LevelUpModal";
 import { ShopPanel } from "./ShopPanel";
+import { CraftPanel } from "./CraftPanel";
+import { AbilityBar } from "./AbilityBar";
 
 interface GameViewProps {
   gameState: GameState;
@@ -37,6 +39,8 @@ interface GameViewProps {
   onInteract?: () => void;
   onBuyItem?: (shopId: number, index: number) => void;
   onSellItem?: (index: number, shopId: number) => void;
+  onUseAbility?: (abilityId: string, target?: Position | null) => void;
+  onCraftItem?: (weaponIdx: number, scrollIdx: number) => void;
 }
 
 export function GameView({
@@ -64,12 +68,15 @@ export function GameView({
   onInteract,
   onBuyItem,
   onSellItem,
+  onUseAbility,
+  onCraftItem,
 }: GameViewProps) {
   const [showInventory, setShowInventory] = useState(false);
   const [targetingMode, setTargetingMode] = useState(false);
   const [targetCursor, setTargetCursor] = useState<Position>({ x: 0, y: 0 });
   const targetCycleIndexRef = useRef(0);
   const [shopData, setShopData] = useState<ShopData | null>(null);
+  const [craftMode, setCraftMode] = useState(false);
   const [toasts, setToasts] = useState<string[]>([]);
 
   // Achievement toast from events
@@ -121,6 +128,14 @@ export function GameView({
     }
   }, [gameState.messages]);
 
+  // Detect anvil interaction
+  useEffect(() => {
+    const latest = gameState.messages[0];
+    if (latest && latest.text.toLowerCase().includes("you see an anvil")) {
+      setCraftMode(true);
+    }
+  }, [gameState.messages]);
+
   const mode: InputMode = pendingLevelUp
     ? "levelup"
     : showInventory
@@ -144,6 +159,12 @@ export function GameView({
       onToggleInspect: () => {},
       onInteract: () => onInteract?.(),
       onAutoExplore: () => onAutoExplore?.(),
+      onUseAbility: (index: number) => {
+        const ability = gameState.player.abilities[index];
+        if (ability) {
+          onUseAbility?.(ability.id);
+        }
+      },
       onEnterTargeting: () => {
         // Start targeting mode with cursor on nearest enemy or player pos
         const firstEnemy = visibleEnemies[0];
@@ -174,7 +195,9 @@ export function GameView({
       },
       onEscape: () => {
         onCancelAutoExplore?.();
-        if (shopData) {
+        if (craftMode) {
+          setCraftMode(false);
+        } else if (shopData) {
           setShopData(null);
         } else if (targetingMode) {
           setTargetingMode(false);
@@ -185,7 +208,7 @@ export function GameView({
         }
       },
     }),
-    [onMove, onWait, onPickUp, onUseStairs, onUseItem, onDropItem, onEquipItem, onLevelUpChoice, showInventory, targetingMode, targetCursor, visibleEnemies, gameState.player.position, gameState.visible_entities, onEscape, onInteract, onAutoExplore, onCancelAutoExplore, onRangedAttack, shopData],
+    [onMove, onWait, onPickUp, onUseStairs, onUseItem, onDropItem, onEquipItem, onLevelUpChoice, showInventory, targetingMode, targetCursor, visibleEnemies, gameState.player.position, gameState.player.abilities, gameState.visible_entities, onEscape, onInteract, onAutoExplore, onCancelAutoExplore, onRangedAttack, onUseAbility, shopData, craftMode],
   );
 
   useInput(mode, inputActions, true);
@@ -234,6 +257,13 @@ export function GameView({
 
   const handleCloseShop = useCallback(() => setShopData(null), []);
 
+  const handleCraft = useCallback((weaponIdx: number, scrollIdx: number) => {
+    onCraftItem?.(weaponIdx, scrollIdx);
+    setCraftMode(false);
+  }, [onCraftItem]);
+
+  const handleCloseCraft = useCallback(() => setCraftMode(false), []);
+
   const currentTargeting: TargetingState | null = targetingMode
     ? {
         cursor: targetCursor,
@@ -264,11 +294,17 @@ export function GameView({
             <div>.: Wait | g: Pick up</div>
             <div>&gt;: Stairs | i: Inventory</div>
             <div>o: Auto-explore | f: Target</div>
-            <div>e: Interact | Esc: Menu</div>
+            <div>e: Interact | 1-4: Abilities</div>
+            <div>Esc: Menu</div>
           </div>
         </div>
       </div>
 
+      <AbilityBar
+        abilities={gameState.player.abilities}
+        currentMana={gameState.player.mana}
+        onUseAbility={(id) => onUseAbility?.(id)}
+      />
       <MessageLog messages={gameState.messages} />
 
       {showInventory && (
@@ -282,7 +318,7 @@ export function GameView({
       )}
 
       {pendingLevelUp && (
-        <LevelUpModal level={gameState.player.level} onChoice={onLevelUpChoice} />
+        <LevelUpModal level={gameState.player.level} choices={gameState.level_up_choices} onChoice={onLevelUpChoice} />
       )}
 
       {shopData && (
@@ -292,6 +328,14 @@ export function GameView({
           onBuy={handleBuy}
           onSell={handleSell}
           onClose={handleCloseShop}
+        />
+      )}
+
+      {craftMode && (
+        <CraftPanel
+          player={gameState.player}
+          onCraft={handleCraft}
+          onClose={handleCloseCraft}
         />
       )}
 

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
-import type { AppScreen, LevelUpChoice, Settings as SettingsType } from "./types/game";
+import type { AppScreen, LevelUpChoice, PlayerClass, Settings as SettingsType } from "./types/game";
 import { useGameState } from "./hooks/useGameState";
-import { getSettings } from "./lib/api";
+import { getSettings, getDailyStatus, startDailyChallenge } from "./lib/api";
 import { GameView } from "./components/game/GameView";
 import { DeathScreen } from "./components/game/DeathScreen";
 import { MainMenu } from "./components/menu/MainMenu";
@@ -9,6 +9,8 @@ import { HighScores } from "./components/menu/HighScores";
 import { RunHistory } from "./components/menu/RunHistory";
 import { Settings } from "./components/menu/Settings";
 import { Achievements } from "./components/menu/Achievements";
+import { ClassSelect } from "./components/menu/ClassSelect";
+import { Statistics } from "./components/menu/Statistics";
 
 function App() {
   const [screen, setScreen] = useState<AppScreen>("menu");
@@ -29,8 +31,15 @@ function App() {
   }, []);
 
   const handleNewGame = useCallback(
-    async (seed?: string) => {
-      await game.startNewGame(seed);
+    () => {
+      setScreen("classSelect");
+    },
+    [],
+  );
+
+  const handleClassSelected = useCallback(
+    async (playerClass: PlayerClass, modifiers: string[]) => {
+      await game.startNewGame(undefined, playerClass, modifiers);
       setScreen("game");
     },
     [game],
@@ -40,6 +49,21 @@ function App() {
     const loaded = await game.continueGame();
     if (loaded) {
       setScreen("game");
+    }
+  }, [game]);
+
+  const handleDailyChallenge = useCallback(async () => {
+    try {
+      const status = await getDailyStatus();
+      if (status.played) {
+        alert(`Already played today's daily challenge! Score: ${status.score ?? 0}, Floor: ${status.floor_reached ?? 0}`);
+        return;
+      }
+      const result = await startDailyChallenge();
+      game.handleResult(result);
+      setScreen("game");
+    } catch (err) {
+      alert(String(err));
     }
   }, [game]);
 
@@ -88,10 +112,19 @@ function App() {
         <MainMenu
           onNewGame={handleNewGame}
           onContinue={handleContinue}
+          onDailyChallenge={handleDailyChallenge}
           onHighScores={() => setScreen("highscores")}
           onRunHistory={() => setScreen("history")}
           onAchievements={() => setScreen("achievements")}
+          onStatistics={() => setScreen("statistics")}
           onSettings={() => setScreen("settings")}
+        />
+      );
+    case "classSelect":
+      return (
+        <ClassSelect
+          onSelectClass={handleClassSelected}
+          onBack={handleBackToMenu}
         />
       );
     case "game":
@@ -121,6 +154,8 @@ function App() {
           onInteract={game.interact}
           onBuyItem={game.buyItem}
           onSellItem={game.sellItem}
+          onUseAbility={game.useAbility}
+          onCraftItem={game.craftItem}
         />
       );
     case "highscores":
@@ -131,6 +166,8 @@ function App() {
       return <Settings onBack={handleBackToMenu} />;
     case "achievements":
       return <Achievements onBack={handleBackToMenu} />;
+    case "statistics":
+      return <Statistics onBack={handleBackToMenu} />;
     default:
       return null;
   }

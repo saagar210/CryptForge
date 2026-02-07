@@ -8,10 +8,11 @@ use super::ai;
 use super::combat;
 use super::dungeon;
 use super::dungeon::placement;
+use super::enemies;
 use super::entity::*;
 use super::fov;
 use super::map::{Map, TileType};
-use super::pathfinding::{self, DijkstraMap};
+use super::pathfinding::{self, has_line_of_sight, DijkstraMap};
 
 const ENERGY_THRESHOLD: i32 = 100;
 
@@ -38,6 +39,19 @@ pub struct World {
     pub spotted_enemies: HashSet<EntityId>,
     #[serde(with = "rng_serde")]
     pub rng: StdRng,
+    pub player_class: PlayerClass,
+    pub mana: i32,
+    pub max_mana: i32,
+    pub hunger: i32,
+    pub max_hunger: i32,
+    pub modifiers: Vec<RunModifier>,
+    #[serde(default)]
+    pub is_daily: bool,
+    pub cleave_bonus: i32,
+    pub spell_power_bonus: i32,
+    pub mana_regen: i32,
+    /// Tracks per-boss action counters for timed abilities (e.g., summon intervals).
+    pub boss_action_counter: HashMap<EntityId, u32>,
 }
 
 mod rng_serde {
@@ -66,9 +80,15 @@ mod rng_serde {
 
 impl World {
     pub fn new(seed: u64) -> Self {
+        Self::new_with_class(seed, PlayerClass::Warrior, Vec::new())
+    }
+
+    pub fn new_with_class(seed: u64, class: PlayerClass, modifiers: Vec<RunModifier>) -> Self {
         let floor = 1;
         let mut rng = StdRng::seed_from_u64(seed);
         let map = dungeon::generate_floor(seed, floor);
+
+        let template = super::classes::get_class_template(class);
 
         // Find start room position for player
         let start_pos = map
@@ -78,7 +98,7 @@ impl World {
             .map(|r| r.center())
             .unwrap_or(Position::new(1, 1));
 
-        let player = placement::spawn_player(start_pos);
+        let player = placement::spawn_player_with_class(start_pos, &template);
         let mut entities = vec![player];
 
         // Spawn floor entities
@@ -87,6 +107,17 @@ impl World {
 
         // Place stairs entities
         place_stairs(&map, &mut entities);
+
+        // Cursed modifier: mark floor items as unidentified
+        if modifiers.contains(&RunModifier::Cursed) {
+            for entity in &mut entities {
+                if let Some(ref mut item) = entity.item {
+                    if item.item_type.is_consumable() {
+                        item.identified = false;
+                    }
+                }
+            }
+        }
 
         // Initialize energy map
         let mut energy = HashMap::new();
@@ -117,6 +148,17 @@ impl World {
             last_damage_source: None,
             spotted_enemies: HashSet::new(),
             rng,
+            player_class: class,
+            mana: template.mana,
+            max_mana: template.max_mana,
+            hunger: 1000,
+            max_hunger: 1000,
+            modifiers,
+            is_daily: false,
+            cleave_bonus: 0,
+            spell_power_bonus: 0,
+            mana_regen: 0,
+            boss_action_counter: HashMap::new(),
         };
 
         // Initial FOV computation
@@ -126,6 +168,60 @@ impl World {
         world.push_message("Welcome to CryptForge! Press ? for help.", LogSeverity::Info);
 
         world
+    }
+
+    /// Add unlocked achievement reward items to the player's starting inventory.
+    pub fn add_unlocked_rewards(&mut self, reward_names: Vec<&str>) {
+        use super::dungeon::placement::next_id;
+        use super::items;
+
+        let player_id = self.player_id;
+        for name in reward_names {
+            if let Some(t) = items::find_template(name) {
+                let item_entity = Entity {
+                    id: next_id(),
+                    name: t.name.to_string(),
+                    position: Position::new(0, 0),
+                    glyph: t.glyph,
+                    render_order: RenderOrder::Item,
+                    blocks_movement: false,
+                    blocks_fov: false,
+                    health: None,
+                    combat: None,
+                    ai: None,
+                    inventory: None,
+                    equipment: None,
+                    item: Some(ItemProperties {
+                        item_type: t.item_type,
+                        slot: t.slot,
+                        power: t.power,
+                        speed_mod: t.speed_mod,
+                        effect: t.effect.clone(),
+                        charges: t.charges,
+                        energy_cost: t.energy_cost,
+                        ammo_type: t.ammo_type,
+                        ranged: t.ranged,
+                        hunger_restore: t.hunger_restore,
+                        enchant_level: 0,
+                        identified: true,
+                    }),
+                    status_effects: Vec::new(),
+                    fov: None,
+                    door: None,
+                    trap: None,
+                    stair: None,
+                    loot_table: None,
+                    flavor_text: None,
+                    shop: None,
+                    interactive: None,
+                    elite: None,
+                    resurrection_timer: None,
+                };
+                if let Some(player) = self.get_entity_mut(player_id) {
+                    let _ = super::inventory::add_to_inventory(player, item_entity);
+                }
+            }
+        }
     }
 
     /// Main turn resolution. Called when the player takes an action.
@@ -169,6 +265,28 @@ impl World {
         events.extend(effect_events);
 
         // Check if player died from status effects
+        if self.is_player_dead() {
+            return self.handle_player_death(events);
+        }
+
+        // 3b. Hunger tick
+        let hunger_events = self.tick_hunger();
+        events.extend(hunger_events);
+
+        if self.is_player_dead() {
+            return self.handle_player_death(events);
+        }
+
+        // 3c. Mana regen
+        let regen = 1 + self.mana_regen;
+        if self.mana < self.max_mana {
+            self.mana = (self.mana + regen).min(self.max_mana);
+        }
+
+        // 3d. Floor-specific effects (resurrection, fire spread, etc.)
+        let floor_events = self.tick_floor_effects();
+        events.extend(floor_events);
+
         if self.is_player_dead() {
             return self.handle_player_death(events);
         }
@@ -346,6 +464,96 @@ impl World {
                     }
                 }
             }
+
+            PlayerActionType::UseAbility { ability_id, target } => {
+                let ability = super::abilities::get_ability(self.player_class, ability_id);
+                if let Some(ab) = ability {
+                    if self.mana >= ab.mana_cost {
+                        self.mana -= ab.mana_cost;
+                        events.push(GameEvent::ManaChanged { amount: -ab.mana_cost });
+                        self.push_message(&format!("You cast {}!", ab.name), LogSeverity::Good);
+                        let pos = target.unwrap_or_else(|| {
+                            self.get_entity(self.player_id).map(|p| p.position).unwrap_or(Position::new(0, 0))
+                        });
+                        events.push(GameEvent::AbilityUsed {
+                            name: ab.name.clone(),
+                            position: pos,
+                            targets: vec![pos],
+                        });
+                    } else {
+                        self.push_message("Not enough mana!", LogSeverity::Warning);
+                    }
+                } else {
+                    self.push_message("Unknown ability.", LogSeverity::Warning);
+                }
+            }
+
+            PlayerActionType::Craft { weapon_idx, scroll_idx } => {
+                // Check if player is adjacent to an anvil
+                let player_pos = self.get_entity(self.player_id).unwrap().position;
+                let has_anvil = self.entities.iter().any(|e| {
+                    e.interactive.as_ref().map_or(false, |i| i.interaction_type == InteractionType::Anvil)
+                        && e.position.chebyshev_distance(&player_pos) <= 1
+                });
+
+                if !has_anvil {
+                    self.push_message("You need to be next to an anvil to craft.", LogSeverity::Warning);
+                } else {
+                    // Simple enchanting: increment weapon power, consume scroll, deduct gold
+                    let weapon_idx = *weapon_idx as usize;
+                    let scroll_idx = *scroll_idx as usize;
+
+                    let (weapon_name, enchant_level) = self.get_entity(self.player_id)
+                        .and_then(|p| p.inventory.as_ref())
+                        .and_then(|inv| inv.items.get(weapon_idx))
+                        .map(|i| (i.name.clone(), i.item.as_ref().map_or(0, |p| p.enchant_level)))
+                        .unwrap_or(("".to_string(), 0));
+
+                    if enchant_level >= 3 {
+                        self.push_message("This weapon is already at maximum enchantment (+3).", LogSeverity::Warning);
+                    } else {
+                        let cost = (10 * (enchant_level + 1)) as u32;
+                        if self.gold < cost {
+                            self.push_message(&format!("You need {} gold to enchant.", cost), LogSeverity::Warning);
+                        } else {
+                            self.gold -= cost;
+
+                            // Remove scroll from inventory
+                            if let Some(player) = self.get_entity_mut(self.player_id) {
+                                if let Some(ref mut inv) = player.inventory {
+                                    if scroll_idx < inv.items.len() {
+                                        inv.items.remove(scroll_idx);
+                                    }
+                                }
+                            }
+
+                            // Enhance weapon
+                            let new_level = enchant_level + 1;
+                            if let Some(player) = self.get_entity_mut(self.player_id) {
+                                if let Some(ref mut inv) = player.inventory {
+                                    if let Some(item) = inv.items.get_mut(weapon_idx) {
+                                        if let Some(ref mut props) = item.item {
+                                            props.power += 1;
+                                            props.enchant_level = new_level;
+                                        }
+                                        // Append +N to name
+                                        item.name = format!("{} +{}", weapon_name.trim_end_matches(&format!(" +{}", enchant_level)), new_level);
+                                    }
+                                }
+                            }
+
+                            self.push_message(
+                                &format!("The anvil glows! {} is now +{}!", weapon_name, new_level),
+                                LogSeverity::Good,
+                            );
+                            events.push(GameEvent::ItemEnchanted {
+                                item_name: weapon_name,
+                                new_level,
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         events
@@ -357,7 +565,44 @@ impl World {
         let attacker = self.get_entity(attacker_id).unwrap().clone();
         let target = self.get_entity(target_id).unwrap().clone();
 
-        let result = combat::resolve_attack(&attacker, &target, &mut self.rng);
+        // Check dodge before resolving attack
+        let dodge_chance = target.combat.as_ref().map_or(0.0, |c| c.dodge_chance);
+        if dodge_chance > 0.0 && self.rng.gen::<f32>() < dodge_chance {
+            let target_name = target.name.clone();
+            let attacker_name = attacker.name.clone();
+            self.push_message(
+                &format!("{} dodges {}'s attack!", target_name, attacker_name),
+                LogSeverity::Good,
+            );
+            events.push(GameEvent::Attacked {
+                attacker_id,
+                target_id,
+                damage: 0,
+                killed: false,
+                damage_type: "physical".to_string(),
+                dodged: true,
+            });
+            return events;
+        }
+
+        let mut result = combat::resolve_attack(&attacker, &target, &mut self.rng);
+
+        // GlassCannon modifier: 2x all damage
+        if self.modifiers.contains(&RunModifier::GlassCannon) {
+            result.damage *= 2;
+        }
+
+        // Determine damage_type from attacker's on_hit effect
+        let damage_type = attacker.combat.as_ref()
+            .and_then(|c| c.on_hit.as_ref())
+            .map(|oh| match oh {
+                OnHitEffect::Burn { .. } => "fire",
+                OnHitEffect::Poison { .. } => "poison",
+                OnHitEffect::Slow { .. } => "ice",
+                _ => "physical",
+            })
+            .unwrap_or("physical")
+            .to_string();
 
         // Apply damage
         if let Some(target_entity) = self.get_entity_mut(target_id) {
@@ -391,6 +636,8 @@ impl World {
             target_id,
             damage: result.damage,
             killed: result.killed,
+            damage_type,
+            dodged: false,
         });
 
         if result.killed {
@@ -519,19 +766,51 @@ impl World {
 
         let entity = self.get_entity(entity_id).unwrap().clone();
         let entity_name = entity.name.clone();
+        let entity_pos = entity.position;
         let is_boss = matches!(entity.ai, Some(AIBehavior::Boss(_)));
+        let is_elite = entity.elite.is_some();
+        let is_ally = matches!(entity.ai, Some(AIBehavior::Ally { .. }));
+
+        // Ally death: no XP/gold, just a message
+        if is_ally {
+            self.push_message(&format!("Your ally {} falls!", entity_name), LogSeverity::Danger);
+            self.remove_entity(entity_id);
+            return events;
+        }
 
         // Grant XP and gold to player
         if entity.ai.is_some() {
             let xp = entity.health.as_ref().map_or(0, |h| h.max as u32);
-            self.player_xp += xp;
+            // Pacifist modifier: no XP from kills
+            if !self.modifiers.contains(&RunModifier::Pacifist) {
+                self.player_xp += xp;
+            }
             self.enemies_killed += 1;
 
-            // Gold drop: 1-5 scaled by floor
+            // Gold drop: 1-5 scaled by floor; elite gets 2x, boss gets 5x
             let gold_drop = self.rng.gen_range(1..=5) + self.floor;
-            let gold_drop = if is_boss { gold_drop * 5 } else { gold_drop };
+            let gold_drop = if is_boss {
+                gold_drop * 5
+            } else if is_elite {
+                gold_drop * 2
+            } else {
+                gold_drop
+            };
             self.gold += gold_drop;
             events.push(GameEvent::GoldGained { amount: gold_drop });
+
+            // Elite enemies have a 50% chance to drop an extra item
+            if is_elite && self.rng.gen::<f32>() < 0.50 {
+                let all_item_templates = crate::engine::items::all_items();
+                if let Some(mut item) = placement::pick_weighted_item(self.floor, &mut self.rng, &all_item_templates) {
+                    item.position = entity_pos;
+                    self.push_message(
+                        &format!("The {} drops a {}!", entity_name, item.name),
+                        LogSeverity::Good,
+                    );
+                    self.entities.push(item);
+                }
+            }
 
             if is_boss {
                 self.bosses_killed += 1;
@@ -544,8 +823,9 @@ impl World {
                     LogSeverity::Good,
                 );
 
-                // Check victory condition (floor 10 boss)
-                if self.floor == 10 {
+                // Check victory condition (floor 10 boss, or floor 20 for Marathon)
+                let victory_floor = if self.modifiers.contains(&RunModifier::Marathon) { 20 } else { 10 };
+                if self.floor == victory_floor {
                     self.victory = true;
                     self.game_over = true;
                     events.push(GameEvent::Victory);
@@ -574,8 +854,22 @@ impl World {
             }
         }
 
-        // Remove the dead entity
-        self.remove_entity(entity_id);
+        // Crypt biome: non-boss enemies get resurrection timer instead of removal
+        let biome = Biome::for_floor(self.floor);
+        if biome == Biome::Crypt && !is_boss && !is_ally {
+            if let Some(entity) = self.get_entity_mut(entity_id) {
+                entity.resurrection_timer = Some(5);
+                entity.ai = None; // Remove AI so it doesn't act while "dead"
+                entity.blocks_movement = false; // Don't block movement while dead
+            }
+            self.push_message(
+                &format!("The {} collapses... but may rise again.", entity_name),
+                LogSeverity::Warning,
+            );
+        } else {
+            // Remove the dead entity
+            self.remove_entity(entity_id);
+        }
 
         events
     }
@@ -653,6 +947,24 @@ impl World {
             None => return events,
         };
 
+        // Boss summon check: Goblin King has a timed summon mechanic driven by
+        // the boss_action_counter, independent of the AI decision.
+        let is_goblin_king = entity.name == "Goblin King"
+            && matches!(&entity.ai, Some(AIBehavior::Boss(_)));
+        if is_goblin_king {
+            let is_phase2 = matches!(&entity.ai, Some(AIBehavior::Boss(BossPhase::Phase2)));
+            let counter = self.boss_action_counter.entry(entity_id).or_insert(0);
+            *counter += 1;
+            let interval = if is_phase2 { 3 } else { 4 };
+            if *counter >= interval {
+                *counter = 0;
+                let summon_events = self.boss_summon_minions(entity_id, is_phase2);
+                events.extend(summon_events);
+                // Summoning consumes the turn
+                return events;
+            }
+        }
+
         // Use AI module for decision making (handles confusion, fleeing, LOS, etc.)
         let action = ai::decide_action(&entity, &player, &self.dijkstra, &self.map, &self.entities);
 
@@ -670,9 +982,414 @@ impl World {
                 events.extend(self.move_random(entity_id));
             }
             ai::AIAction::Wait => {}
+            ai::AIAction::BossSummon { summon_archers } => {
+                // Fallback if reached through AI (shouldn't normally happen for Goblin King)
+                events.extend(self.boss_summon_minions(entity_id, summon_archers));
+            }
+            ai::AIAction::BossCharge { stun } => {
+                events.extend(self.boss_charge(entity_id, stun));
+            }
+            ai::AIAction::BossTeleport => {
+                events.extend(self.boss_teleport(entity_id));
+            }
+            ai::AIAction::BossFrostBolt => {
+                events.extend(self.boss_frost_bolt(entity_id));
+            }
         }
 
         events
+    }
+
+    // --- Boss-specific action methods ---
+
+    /// Goblin King summons 1-2 Goblins (Phase 1) or Goblin Archers (Phase 2).
+    fn boss_summon_minions(&mut self, boss_id: EntityId, summon_archers: bool) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        let boss = match self.get_entity(boss_id) {
+            Some(e) => e.clone(),
+            None => return events,
+        };
+
+        let boss_pos = boss.position;
+        let count = self.rng.gen_range(1..=2u32);
+        let summon_name = if summon_archers { "Goblin Archer" } else { "Goblin" };
+
+        let all_templates = enemies::all_enemies();
+        let template = match all_templates.iter().find(|t| t.name == summon_name) {
+            Some(t) => t,
+            None => return events,
+        };
+
+        let mut summoned_names = Vec::new();
+
+        // Find walkable tiles adjacent to boss
+        for _ in 0..count {
+            let spawn_pos = self.find_spawn_position_near(boss_pos, 2);
+            if let Some(pos) = spawn_pos {
+                let minion = Entity {
+                    id: placement::next_id(),
+                    name: template.name.to_string(),
+                    position: pos,
+                    glyph: template.glyph,
+                    render_order: RenderOrder::Enemy,
+                    blocks_movement: true,
+                    blocks_fov: false,
+                    health: Some(Health::new(template.hp)),
+                    combat: Some(CombatStats {
+                        base_attack: template.attack,
+                        base_defense: template.defense,
+                        base_speed: template.speed,
+                        crit_chance: template.crit_chance,
+                        dodge_chance: 0.0,
+                        ranged: if summon_archers {
+                            None // Ranged behavior is handled by AI, not stats
+                        } else {
+                            None
+                        },
+                        on_hit: None,
+                    }),
+                    ai: Some(template.ai.clone()),
+                    inventory: None,
+                    equipment: None,
+                    item: None,
+                    status_effects: Vec::new(),
+                    fov: Some(FieldOfView::new(6)),
+                    door: None,
+                    trap: None,
+                    stair: None,
+                    loot_table: None,
+                    flavor_text: None,
+                    shop: None,
+                    interactive: None,
+                    elite: None,
+                    resurrection_timer: None,
+                };
+
+                let minion_id = minion.id;
+                summoned_names.push(minion.name.clone());
+                self.energy.insert(minion_id, 0);
+                self.entities.push(minion);
+            }
+        }
+
+        if !summoned_names.is_empty() {
+            let msg = format!(
+                "{} summons {}!",
+                boss.name,
+                summoned_names.join(" and ")
+            );
+            self.push_message(&msg, LogSeverity::Danger);
+
+            events.push(GameEvent::BossSummon {
+                boss_name: boss.name.clone(),
+                summoned: summoned_names,
+            });
+        }
+
+        events
+    }
+
+    /// Troll Warlord charges to an adjacent tile next to the player and attacks with 2x damage.
+    /// In Phase 2, also stuns the player for 1 turn.
+    fn boss_charge(&mut self, boss_id: EntityId, stun: bool) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        let boss = match self.get_entity(boss_id) {
+            Some(e) => e.clone(),
+            None => return events,
+        };
+
+        let player = match self.get_entity(self.player_id) {
+            Some(p) => p.clone(),
+            None => return events,
+        };
+
+        let boss_pos = boss.position;
+        let player_pos = player.position;
+
+        // Find an unblocked tile adjacent to the player to charge to
+        let charge_target = Direction::ALL.iter()
+            .map(|d| player_pos.apply_direction(*d))
+            .find(|pos| {
+                self.map.in_bounds(pos.x, pos.y)
+                    && self.map.is_walkable(pos.x, pos.y)
+                    && !self.is_blocked(*pos, boss_id)
+            });
+
+        if let Some(target_pos) = charge_target {
+            // Move boss to charge position
+            let from = boss_pos;
+            self.move_entity(boss_id, target_pos);
+
+            let boss_name = boss.name.clone();
+            self.push_message(
+                &format!("{} charges at you!", boss_name),
+                LogSeverity::Danger,
+            );
+
+            events.push(GameEvent::BossCharge {
+                boss_id,
+                from,
+                to: target_pos,
+            });
+
+            // Attack with 2x damage: temporarily boost attack, perform attack, restore
+            let original_attack = self.get_entity(boss_id)
+                .and_then(|e| e.combat.as_ref())
+                .map(|c| c.base_attack)
+                .unwrap_or(0);
+
+            if let Some(boss_entity) = self.get_entity_mut(boss_id) {
+                if let Some(ref mut combat) = boss_entity.combat {
+                    combat.base_attack *= 2;
+                }
+            }
+
+            events.extend(self.perform_attack(boss_id, self.player_id));
+
+            // Restore original attack
+            if let Some(boss_entity) = self.get_entity_mut(boss_id) {
+                if let Some(ref mut combat) = boss_entity.combat {
+                    combat.base_attack = original_attack;
+                }
+            }
+
+            // Phase 2: stun the player for 1 turn
+            if stun {
+                let already_stunned = self.get_entity(self.player_id)
+                    .map(|p| p.status_effects.iter().any(|s| s.effect_type == StatusType::Stunned))
+                    .unwrap_or(false);
+
+                if !already_stunned {
+                    if let Some(player_entity) = self.get_entity_mut(self.player_id) {
+                        player_entity.status_effects.push(StatusEffect {
+                            effect_type: StatusType::Stunned,
+                            duration: 1,
+                            magnitude: 0,
+                            source: "Troll Warlord charge".to_string(),
+                        });
+                    }
+                    self.push_message("The charge stuns you!", LogSeverity::Danger);
+                    events.push(GameEvent::StatusApplied {
+                        entity_id: self.player_id,
+                        effect: StatusType::Stunned,
+                        duration: 1,
+                    });
+                }
+            }
+        } else {
+            // No valid charge position: fall back to move toward player
+            events.extend(self.move_toward_player(boss_id));
+        }
+
+        events
+    }
+
+    /// The Lich teleports 4-6 tiles away from the player and applies Burning to
+    /// the player if they were adjacent (fire at old position).
+    fn boss_teleport(&mut self, boss_id: EntityId) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        let boss = match self.get_entity(boss_id) {
+            Some(e) => e.clone(),
+            None => return events,
+        };
+
+        let player = match self.get_entity(self.player_id) {
+            Some(p) => p.clone(),
+            None => return events,
+        };
+
+        let old_pos = boss.position;
+        let player_pos = player.position;
+
+        // Find a valid teleport destination 4-6 tiles away from the player
+        let teleport_dest = self.find_teleport_destination(player_pos, 4, 6, boss_id);
+
+        if let Some(new_pos) = teleport_dest {
+            self.move_entity(boss_id, new_pos);
+
+            self.push_message(
+                &format!("{} vanishes in a flash of dark flame!", boss.name),
+                LogSeverity::Danger,
+            );
+
+            events.push(GameEvent::Moved {
+                entity_id: boss_id,
+                from: old_pos,
+                to: new_pos,
+            });
+
+            // Leave fire at old position: apply Burning to the player if adjacent
+            // (i.e., the player was next to the Lich and stepped into the fire zone)
+            let player_distance_to_old = player_pos.chebyshev_distance(&old_pos);
+            if player_distance_to_old <= 1 {
+                let already_burning = self.get_entity(self.player_id)
+                    .map(|p| p.status_effects.iter().any(|s| s.effect_type == StatusType::Burning))
+                    .unwrap_or(false);
+
+                if !already_burning {
+                    if let Some(player_entity) = self.get_entity_mut(self.player_id) {
+                        player_entity.status_effects.push(StatusEffect {
+                            effect_type: StatusType::Burning,
+                            duration: 3,
+                            magnitude: 4,
+                            source: "Lich's dark flame".to_string(),
+                        });
+                    }
+                    self.push_message("Dark flames sear you!", LogSeverity::Danger);
+                    events.push(GameEvent::StatusApplied {
+                        entity_id: self.player_id,
+                        effect: StatusType::Burning,
+                        duration: 3,
+                    });
+                }
+            }
+
+            // Phase 2 additional mechanic is handled by the AI returning BossFrostBolt
+            // on subsequent turns (not during teleport turn).
+        } else {
+            // Couldn't teleport; fall back to melee attack
+            events.extend(self.perform_attack(boss_id, self.player_id));
+        }
+
+        events
+    }
+
+    /// The Lich (Phase 2) fires a frost bolt at the player, dealing damage and applying Slowed.
+    fn boss_frost_bolt(&mut self, boss_id: EntityId) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        let boss = match self.get_entity(boss_id) {
+            Some(e) => e.clone(),
+            None => return events,
+        };
+
+        let player = match self.get_entity(self.player_id) {
+            Some(p) => p.clone(),
+            None => return events,
+        };
+
+        let boss_pos = boss.position;
+        let player_pos = player.position;
+
+        // Check LOS
+        if !has_line_of_sight(&self.map, boss_pos, player_pos) {
+            // No LOS, fall back to move
+            events.extend(self.move_toward_player(boss_id));
+            return events;
+        }
+
+        // Calculate frost bolt damage (base_attack * 0.8)
+        let damage = boss.combat.as_ref()
+            .map(|c| (c.base_attack as f32 * 0.8) as i32)
+            .unwrap_or(5)
+            .max(3);
+
+        // Apply damage to player
+        if let Some(player_entity) = self.get_entity_mut(self.player_id) {
+            if let Some(ref mut health) = player_entity.health {
+                health.current -= damage;
+            }
+        }
+
+        self.last_damage_source = Some("Struck by the Lich's frost bolt".to_string());
+        self.push_message(
+            &format!("{} hurls a frost bolt at you for {} damage!", boss.name, damage),
+            LogSeverity::Danger,
+        );
+
+        events.push(GameEvent::ProjectileFired {
+            from: boss_pos,
+            to: player_pos,
+            hit: true,
+        });
+
+        events.push(GameEvent::DamageTaken {
+            entity_id: self.player_id,
+            amount: damage,
+            source: "Frost Bolt".to_string(),
+        });
+
+        // Apply Slowed status
+        let already_slowed = self.get_entity(self.player_id)
+            .map(|p| p.status_effects.iter().any(|s| s.effect_type == StatusType::Slowed))
+            .unwrap_or(false);
+
+        if !already_slowed {
+            if let Some(player_entity) = self.get_entity_mut(self.player_id) {
+                player_entity.status_effects.push(StatusEffect {
+                    effect_type: StatusType::Slowed,
+                    duration: 2,
+                    magnitude: 30,
+                    source: "Lich's frost bolt".to_string(),
+                });
+            }
+            self.push_message("The frost chills your bones, slowing you!", LogSeverity::Warning);
+            events.push(GameEvent::StatusApplied {
+                entity_id: self.player_id,
+                effect: StatusType::Slowed,
+                duration: 2,
+            });
+        }
+
+        events
+    }
+
+    /// Find a walkable, unblocked position within `radius` tiles of `center`.
+    fn find_spawn_position_near(&mut self, center: Position, radius: i32) -> Option<Position> {
+        let mut candidates = Vec::new();
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let pos = Position::new(center.x + dx, center.y + dy);
+                if self.map.in_bounds(pos.x, pos.y)
+                    && self.map.is_walkable(pos.x, pos.y)
+                    && !self.is_blocked(pos, 0) // 0 won't match any entity
+                {
+                    candidates.push(pos);
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        Some(candidates[idx])
+    }
+
+    /// Find a teleport destination `min_dist` to `max_dist` tiles away from `away_from`,
+    /// on a walkable, unblocked tile.
+    fn find_teleport_destination(
+        &mut self,
+        away_from: Position,
+        min_dist: i32,
+        max_dist: i32,
+        self_id: EntityId,
+    ) -> Option<Position> {
+        let mut candidates = Vec::new();
+        for dy in -max_dist..=max_dist {
+            for dx in -max_dist..=max_dist {
+                let pos = Position::new(away_from.x + dx, away_from.y + dy);
+                let dist = pos.chebyshev_distance(&away_from);
+                if dist >= min_dist
+                    && dist <= max_dist
+                    && self.map.in_bounds(pos.x, pos.y)
+                    && self.map.is_walkable(pos.x, pos.y)
+                    && !self.is_blocked(pos, self_id)
+                {
+                    candidates.push(pos);
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        Some(candidates[idx])
     }
 
     fn move_toward_player(&mut self, entity_id: EntityId) -> Vec<GameEvent> {
@@ -846,6 +1563,109 @@ impl World {
                     });
                 }
             }
+        }
+
+        events
+    }
+
+    fn tick_hunger(&mut self) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        if self.hunger <= 0 {
+            // Starving: 1 damage every 5 turns
+            if self.turn % 5 == 0 {
+                self.last_damage_source = Some("Starved to death".to_string());
+                if let Some(player) = self.get_entity_mut(self.player_id) {
+                    if let Some(ref mut health) = player.health {
+                        health.current -= 1;
+                    }
+                }
+                events.push(GameEvent::DamageTaken {
+                    entity_id: self.player_id,
+                    amount: 1,
+                    source: "starvation".to_string(),
+                });
+                self.push_message("You are starving!", LogSeverity::Danger);
+            }
+            return events;
+        }
+
+        self.hunger -= 1;
+
+        // Threshold messages
+        match self.hunger {
+            500 => self.push_message("You are getting hungry.", LogSeverity::Warning),
+            250 => self.push_message("You are very hungry!", LogSeverity::Warning),
+            100 => self.push_message("You are famished!", LogSeverity::Danger),
+            0 => self.push_message("You are starving! Find food!", LogSeverity::Danger),
+            _ => {}
+        }
+
+        events.push(GameEvent::HungerChanged { level: self.hunger });
+        events
+    }
+
+    fn apply_cursed_to_items(&mut self) {
+        for entity in &mut self.entities {
+            if entity.id == self.player_id {
+                continue; // Don't modify player's existing inventory
+            }
+            if let Some(ref mut item) = entity.item {
+                if item.item_type.is_consumable() {
+                    item.identified = false;
+                }
+            }
+        }
+    }
+
+    fn tick_floor_effects(&mut self) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        let biome = Biome::for_floor(self.floor);
+
+        match biome {
+            Biome::Crypt => {
+                // Undead resurrection: decrement timers, resurrect at 0
+                let mut resurrect_ids = Vec::new();
+                for entity in &mut self.entities {
+                    if let Some(ref mut timer) = entity.resurrection_timer {
+                        if *timer > 0 {
+                            *timer -= 1;
+                            if *timer == 0 {
+                                resurrect_ids.push(entity.id);
+                            }
+                        }
+                    }
+                }
+                for id in resurrect_ids {
+                    if let Some(entity) = self.get_entity_mut(id) {
+                        // Resurrect at 50% HP
+                        if let Some(ref mut health) = entity.health {
+                            health.current = health.max / 2;
+                        }
+                        entity.resurrection_timer = None;
+                        entity.ai = Some(AIBehavior::Melee); // Restore AI
+                        let name = entity.name.clone();
+                        let pos = entity.position;
+                        self.energy.insert(id, 0);
+                        self.push_message(
+                            &format!("The {} rises from the dead!", name),
+                            LogSeverity::Danger,
+                        );
+                        events.push(GameEvent::EnemySpotted {
+                            entity_id: id,
+                            name,
+                        });
+                        // Mark as spotted again
+                        self.spotted_enemies.remove(&id);
+                        // Re-insert to visible set at position
+                        let _ = pos; // position is already set on the entity
+                    }
+                }
+            }
+            Biome::Abyss => {
+                // Reduce player FOV radius by 3 (applied in recompute_fov via check)
+                // This is handled in recompute_fov, no per-turn action needed here
+            }
+            _ => {}
         }
 
         events
@@ -1133,12 +1953,20 @@ impl World {
         // Place stairs
         place_stairs(&self.map, &mut self.entities);
 
+        // Cursed modifier: mark all new floor items as unidentified
+        if self.modifiers.contains(&RunModifier::Cursed) {
+            self.apply_cursed_to_items();
+        }
+
         // Re-init energy
         for entity in &self.entities {
             if entity.combat.is_some() {
                 self.energy.insert(entity.id, 0);
             }
         }
+
+        // Clear boss action counters for new floor
+        self.boss_action_counter.clear();
 
         // Recompute FOV and Dijkstra
         self.recompute_fov();
@@ -1370,6 +2198,30 @@ impl World {
             effect: effect_desc,
         });
 
+        // Restore hunger if item has hunger_restore
+        if item_props.hunger_restore > 0 {
+            let old_hunger = self.hunger;
+            self.hunger = (self.hunger + item_props.hunger_restore).min(self.max_hunger);
+            let restored = self.hunger - old_hunger;
+            if restored > 0 {
+                self.push_message(&format!("You feel satiated. (+{} fullness)", restored), LogSeverity::Good);
+                events.push(GameEvent::HungerChanged { level: self.hunger });
+            }
+        }
+
+        // Cursed: mark item as identified on use (so player learns its true name)
+        if !item_props.identified {
+            if let Some(player) = self.get_entity_mut(self.player_id) {
+                if let Some(ref mut inv) = player.inventory {
+                    if let Some(inv_item) = inv.items.iter_mut().find(|i| i.id == item.id) {
+                        if let Some(ref mut props) = inv_item.item {
+                            props.identified = true;
+                        }
+                    }
+                }
+            }
+        }
+
         // Remove consumable from inventory (but not wands)
         if item_props.item_type.is_consumable() {
             if let Some(player) = self.get_entity_mut(self.player_id) {
@@ -1559,32 +2411,24 @@ impl World {
             LevelUpChoice::Attack => "+2 Attack!",
             LevelUpChoice::Defense => "+2 Defense!",
             LevelUpChoice::Speed => "+15 Speed!",
+            LevelUpChoice::Cleave => "+1 Cleave bonus!",
+            LevelUpChoice::Fortify => "+3 Defense!",
+            LevelUpChoice::Backstab => "+5% Crit chance!",
+            LevelUpChoice::Evasion => "+5% Dodge chance!",
+            LevelUpChoice::SpellPower => "+5 Spell Power!",
+            LevelUpChoice::ManaRegen => "+1 Mana Regen!",
         };
 
+        // Handle World-level bonuses
+        match choice {
+            LevelUpChoice::Cleave => self.cleave_bonus += 1,
+            LevelUpChoice::SpellPower => self.spell_power_bonus += 5,
+            LevelUpChoice::ManaRegen => self.mana_regen += 1,
+            _ => {}
+        }
+
         if let Some(player) = self.get_entity_mut(self.player_id) {
-            match choice {
-                LevelUpChoice::MaxHp => {
-                    if let Some(ref mut health) = player.health {
-                        health.max += 10;
-                        health.current += 10;
-                    }
-                }
-                LevelUpChoice::Attack => {
-                    if let Some(ref mut combat) = player.combat {
-                        combat.base_attack += 2;
-                    }
-                }
-                LevelUpChoice::Defense => {
-                    if let Some(ref mut combat) = player.combat {
-                        combat.base_defense += 2;
-                    }
-                }
-                LevelUpChoice::Speed => {
-                    if let Some(ref mut combat) = player.combat {
-                        combat.base_speed += 15;
-                    }
-                }
-            }
+            super::level::apply_level_up_choice(player, choice);
         }
 
         self.push_message(desc, LogSeverity::Good);
@@ -1649,7 +2493,12 @@ impl World {
 
     fn hostile_entity_at(&self, pos: Position) -> Option<EntityId> {
         self.entities.iter()
-            .find(|e| e.position == pos && e.ai.is_some() && e.health.is_some())
+            .find(|e| {
+                e.position == pos
+                    && e.ai.is_some()
+                    && !matches!(&e.ai, Some(AIBehavior::Ally { .. }))
+                    && e.health.is_some()
+            })
             .map(|e| e.id)
     }
 
@@ -1765,6 +2614,8 @@ impl World {
                 target_id,
                 damage: result.damage,
                 killed: result.killed,
+                damage_type: "physical".to_string(),
+                dodged: false,
             });
 
             if result.killed {
@@ -1881,6 +2732,8 @@ impl World {
             target_id,
             damage: result.damage,
             killed: result.killed,
+            damage_type: "physical".to_string(),
+            dodged: false,
         });
 
         if result.killed {
@@ -1987,6 +2840,9 @@ impl World {
                 energy_cost: template.energy_cost,
                 ammo_type: template.ammo_type,
                 ranged: template.ranged,
+                hunger_restore: 0,
+                enchant_level: 0,
+                identified: true,
             }),
             status_effects: Vec::new(),
             fov: None,
@@ -1997,6 +2853,8 @@ impl World {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         };
 
         // Deduct gold and add item
@@ -2177,6 +3035,9 @@ impl World {
                                 energy_cost: template.energy_cost,
                                 ammo_type: template.ammo_type,
                                 ranged: template.ranged,
+                                hunger_restore: 0,
+                                enchant_level: 0,
+                                identified: true,
                             }),
                             status_effects: Vec::new(),
                             fov: None,
@@ -2187,6 +3048,8 @@ impl World {
                             flavor_text: None,
                             shop: None,
                             interactive: None,
+                            elite: None,
+                            resurrection_timer: None,
                         };
                         dropped_item_name = Some(template.name.to_string());
                         self.entities.push(item_entity);
@@ -2388,6 +3251,9 @@ impl World {
                                 energy_cost: template.energy_cost,
                                 ammo_type: template.ammo_type,
                                 ranged: template.ranged,
+                                hunger_restore: 0,
+                                enchant_level: 0,
+                                identified: true,
                             }),
                             status_effects: Vec::new(),
                             fov: None,
@@ -2398,6 +3264,8 @@ impl World {
                             flavor_text: None,
                             shop: None,
                             interactive: None,
+                            elite: None,
+                            resurrection_timer: None,
                         };
                         item_names.push(template.name.to_string());
                         self.entities.push(item_entity);
@@ -2531,6 +3399,10 @@ impl World {
                     item_name,
                     stat_gained: stat_name,
                 });
+            }
+
+            InteractionType::Anvil => {
+                self.push_message("An anvil for enchanting weapons. Use the Craft action with a weapon and scroll.", LogSeverity::Info);
             }
         }
 
@@ -2681,13 +3553,30 @@ impl World {
             .map(|e| (e.id, e.position, e.fov.as_ref().unwrap().radius))
             .collect();
 
-        for (id, pos, radius) in entity_ids {
-            let visible = fov::compute_fov(pos, radius, &self.map);
+        let abyss_reduction = if Biome::for_floor(self.floor) == Biome::Abyss { 3 } else { 0 };
 
-            // If player, also reveal tiles
+        for (id, pos, radius) in entity_ids {
+            // Abyss biome reduces player FOV by 3
+            let effective_radius = if id == self.player_id {
+                (radius - abyss_reduction).max(2)
+            } else {
+                radius
+            };
+            let visible = fov::compute_fov(pos, effective_radius, &self.map);
+
+            // If player, also reveal tiles (and grant Pacifist XP for new tiles)
             if id == self.player_id {
+                let mut new_tiles = 0u32;
                 for p in &visible {
+                    let idx = self.map.idx(p.x, p.y);
+                    if !self.map.revealed[idx] {
+                        new_tiles += 1;
+                    }
                     self.map.reveal(p.x, p.y);
+                }
+                // Pacifist modifier: 2 XP per newly revealed tile
+                if self.modifiers.contains(&RunModifier::Pacifist) && new_tiles > 0 {
+                    self.player_xp += new_tiles * 2;
                 }
             }
 
@@ -2733,6 +3622,8 @@ impl World {
                 cause_of_death: Some(cause),
                 victory: false,
                 timestamp: String::new(),
+                class: format!("{:?}", self.player_class),
+                modifiers: self.modifiers.iter().map(|m| format!("{:?}", m)).collect(),
             },
         });
         result
@@ -2744,7 +3635,19 @@ impl World {
         let boss_score = self.bosses_killed * 500;
         let level_score = self.player_level * 50;
         let victory_bonus = if self.victory { 5000 } else { 0 };
-        floor_score + kill_score + boss_score + level_score + victory_bonus
+        let base_score = floor_score + kill_score + boss_score + level_score + victory_bonus;
+
+        // Apply run modifier score multipliers
+        let mut multiplier: f32 = 1.0;
+        for modifier in &self.modifiers {
+            multiplier *= match modifier {
+                RunModifier::GlassCannon => 1.5,
+                RunModifier::Marathon => 2.0,
+                RunModifier::Pacifist => 2.5,
+                RunModifier::Cursed => 1.3,
+            };
+        }
+        (base_score as f32 * multiplier) as u32
     }
 
     pub fn build_turn_result(&self, events: Vec<GameEvent>) -> TurnResult {
@@ -2809,6 +3712,8 @@ impl World {
                     cause_of_death: None,
                     victory: true,
                     timestamp: String::new(),
+                    class: format!("{:?}", self.player_class),
+                    modifiers: self.modifiers.iter().map(|m| format!("{:?}", m)).collect(),
                 },
             })
         } else {
@@ -2827,6 +3732,7 @@ impl World {
                 pending_level_up: self.pending_level_up,
                 biome: Biome::for_floor(self.floor),
                 seed: self.seed,
+                level_up_choices: super::classes::get_level_up_choices(self.player_class),
             },
             events,
             game_over,
@@ -2888,6 +3794,12 @@ impl World {
             inventory,
             equipment,
             status_effects,
+            player_class: self.player_class,
+            mana: self.mana,
+            max_mana: self.max_mana,
+            abilities: super::abilities::to_ability_views(self.player_class),
+            hunger: self.hunger,
+            max_hunger: self.max_hunger,
         }
     }
 
@@ -2983,6 +3895,8 @@ fn place_stairs(map: &Map, entities: &mut Vec<Entity>) {
                     flavor_text: None,
                     shop: None,
                     interactive: None,
+                    elite: None,
+                    resurrection_timer: None,
                 });
                 return;
             }
@@ -2991,8 +3905,11 @@ fn place_stairs(map: &Map, entities: &mut Vec<Entity>) {
 }
 
 fn entity_to_view(entity: &Entity) -> EntityView {
+    let is_ally = matches!(&entity.ai, Some(AIBehavior::Ally { .. }));
     let entity_type = if entity.id == 0 {
         EntityType::Player
+    } else if is_ally {
+        EntityType::Enemy // Allies still rendered as entities, frontend uses is_ally flag
     } else if entity.ai.is_some() {
         EntityType::Enemy
     } else if entity.item.is_some() {
@@ -3017,17 +3934,37 @@ fn entity_to_view(entity: &Entity) -> EntityView {
         glyph: entity.glyph,
         hp: entity.health.as_ref().map(|h| (h.current, h.max)),
         flavor_text: entity.flavor_text.clone(),
+        status_effects: entity.status_effects.iter().map(|s| StatusView {
+            effect_type: s.effect_type,
+            duration: s.duration,
+            magnitude: s.magnitude,
+        }).collect(),
+        elite: entity.elite.as_ref().map(|e| format!("{:?}", e)),
+        is_ally,
     }
 }
 
 fn entity_to_item_view(entity: &Entity) -> ItemView {
     let item_props = entity.item.as_ref();
+    let identified = item_props.map(|p| p.identified).unwrap_or(true);
+    let name = if identified {
+        entity.name.clone()
+    } else {
+        // Cursed modifier: show generic name for unidentified consumables
+        match item_props.map(|p| p.item_type) {
+            Some(ItemType::Potion) => "Unknown Potion".to_string(),
+            Some(ItemType::Scroll) => "Unknown Scroll".to_string(),
+            Some(ItemType::Food) => "Unknown Food".to_string(),
+            _ => entity.name.clone(),
+        }
+    };
     ItemView {
         id: entity.id,
-        name: entity.name.clone(),
+        name,
         item_type: item_props.map(|p| p.item_type).unwrap_or(ItemType::Key),
         slot: item_props.and_then(|p| p.slot),
         charges: item_props.and_then(|p| p.charges),
+        identified,
     }
 }
 
@@ -3120,6 +4057,7 @@ mod tests {
                 base_defense: 0,
                 base_speed: 100,
                 crit_chance: 0.0,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -3136,6 +4074,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         };
         world.entities.push(enemy);
         world.energy.insert(999, 0);
@@ -3175,6 +4115,7 @@ mod tests {
                 base_defense: 0,
                 base_speed: 100,
                 crit_chance: 0.0,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -3191,6 +4132,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         };
         world.entities.push(enemy);
         world.energy.insert(999, 0);
@@ -3342,6 +4285,8 @@ mod tests {
                 activated: false,
                 contained_items: items,
             }),
+            elite: None,
+            resurrection_timer: None,
         });
     }
 
@@ -3429,6 +4374,9 @@ mod tests {
                         energy_cost: 0,
                         ammo_type: None,
                         ranged: None,
+                        hunger_restore: 0,
+                        enchant_level: 0,
+                        identified: true,
                     }),
                     status_effects: Vec::new(),
                     fov: None,
@@ -3439,6 +4387,8 @@ mod tests {
                     flavor_text: None,
                     shop: None,
                     interactive: None,
+                    elite: None,
+                    resurrection_timer: None,
                 });
             }
         }

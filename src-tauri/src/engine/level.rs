@@ -45,6 +45,30 @@ pub fn apply_level_up_choice(entity: &mut Entity, choice: LevelUpChoice) {
                 combat.base_speed += 15;
             }
         }
+        LevelUpChoice::Cleave => {
+            // Handled at World level (cleave_bonus)
+        }
+        LevelUpChoice::Fortify => {
+            if let Some(ref mut combat) = entity.combat {
+                combat.base_defense += 3;
+            }
+        }
+        LevelUpChoice::Backstab => {
+            if let Some(ref mut combat) = entity.combat {
+                combat.crit_chance += 0.05;
+            }
+        }
+        LevelUpChoice::Evasion => {
+            if let Some(ref mut combat) = entity.combat {
+                combat.dodge_chance += 0.05;
+            }
+        }
+        LevelUpChoice::SpellPower => {
+            // Handled at World level (spell_power_bonus)
+        }
+        LevelUpChoice::ManaRegen => {
+            // Handled at World level (mana_regen)
+        }
     }
 }
 
@@ -83,6 +107,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -99,6 +124,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         }
     }
 

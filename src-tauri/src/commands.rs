@@ -14,7 +14,7 @@ pub struct AppState {
 }
 
 #[tauri::command]
-pub fn new_game(seed: Option<String>, state: State<'_, AppState>) -> Result<TurnResult, String> {
+pub fn new_game(seed: Option<String>, class: Option<String>, modifiers: Option<Vec<String>>, state: State<'_, AppState>) -> Result<TurnResult, String> {
     let seed_val: u64 = match seed {
         Some(s) if !s.is_empty() => s.parse().unwrap_or_else(|_| {
             // Hash the string to get a seed
@@ -33,12 +33,44 @@ pub fn new_game(seed: Option<String>, state: State<'_, AppState>) -> Result<Turn
         }
     };
 
-    let world = World::new(seed_val);
+    let player_class = match class.as_deref() {
+        Some("Rogue") => PlayerClass::Rogue,
+        Some("Mage") => PlayerClass::Mage,
+        _ => PlayerClass::Warrior,
+    };
+
+    let run_modifiers: Vec<RunModifier> = modifiers.unwrap_or_default().iter().filter_map(|m| {
+        match m.as_str() {
+            "GlassCannon" => Some(RunModifier::GlassCannon),
+            "Marathon" => Some(RunModifier::Marathon),
+            "Pacifist" => Some(RunModifier::Pacifist),
+            "Cursed" => Some(RunModifier::Cursed),
+            _ => None,
+        }
+    }).collect();
+
+    let mut world = World::new_with_class(seed_val, player_class, run_modifiers);
+
+    // Add unlocked achievement rewards to starting inventory
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let rewards = achievements::get_unlocked_rewards(&db);
+        if !rewards.is_empty() {
+            world.add_unlocked_rewards(rewards);
+        }
+    }
+
     let result = world.build_turn_result(Vec::new());
 
     *state.world.lock().map_err(|e| e.to_string())? = Some(world);
 
     Ok(result)
+}
+
+#[tauri::command]
+pub fn get_statistics(state: State<'_, AppState>) -> Result<std::collections::HashMap<String, i64>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    database::get_all_stats(&db)
 }
 
 #[tauri::command]
@@ -246,6 +278,12 @@ pub fn get_achievements(state: State<'_, AppState>) -> Result<Vec<achievements::
 }
 
 #[tauri::command]
+pub fn get_unlockables(state: State<'_, AppState>) -> Result<Vec<achievements::UnlockStatus>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(achievements::get_all_unlock_statuses(&db))
+}
+
+#[tauri::command]
 pub fn check_ollama(state: State<'_, AppState>) -> Result<OllamaStatus, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let settings = config::load_settings(&db);
@@ -274,4 +312,40 @@ pub fn check_ollama(state: State<'_, AppState>) -> Result<OllamaStatus, String> 
         model_loaded: available, // simplified — real check would parse the response
         url: settings.ollama_url,
     })
+}
+
+#[tauri::command]
+pub fn start_daily_challenge(state: State<'_, AppState>) -> Result<TurnResult, String> {
+    let today = save::today_date_string();
+    let date_key = format!("daily-{}", today);
+
+    // Check if already played today
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        if database::has_played_daily(&db, &today) {
+            return Err("Already played today's daily challenge".to_string());
+        }
+    }
+
+    // Generate deterministic seed from date string
+    let mut h: u64 = 5381;
+    for c in date_key.bytes() {
+        h = h.wrapping_mul(33).wrapping_add(c as u64);
+    }
+    let seed = h;
+
+    let mut world = World::new_with_class(seed, PlayerClass::Warrior, Vec::new());
+    world.is_daily = true;
+    let result = world.build_turn_result(Vec::new());
+
+    *state.world.lock().map_err(|e| e.to_string())? = Some(world);
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn get_daily_status(state: State<'_, AppState>) -> Result<DailyStatus, String> {
+    let today = save::today_date_string();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(database::get_daily_status(&db, &today))
 }

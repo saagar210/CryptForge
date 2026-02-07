@@ -27,6 +27,8 @@ pub struct Entity {
     pub flavor_text: Option<String>,
     pub shop: Option<ShopInventory>,
     pub interactive: Option<Interactive>,
+    pub elite: Option<ElitePrefix>,
+    pub resurrection_timer: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -126,6 +128,7 @@ pub struct CombatStats {
     pub base_defense: i32,
     pub base_speed: i32,
     pub crit_chance: f32,
+    pub dodge_chance: f32,
     pub ranged: Option<RangedStats>,
     pub on_hit: Option<OnHitEffect>,
 }
@@ -156,6 +159,9 @@ pub enum AIBehavior {
     Passive,
     Fleeing,
     Boss(BossPhase),
+    Ally {
+        follow_distance: i32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +255,9 @@ pub struct ItemProperties {
     pub energy_cost: i32,
     pub ammo_type: Option<AmmoType>,
     pub ranged: Option<RangedStats>,
+    pub hunger_restore: i32,
+    pub enchant_level: i32,
+    pub identified: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -441,6 +450,7 @@ pub enum InteractionType {
     Fountain,
     Altar,
     Chest,
+    Anvil,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -499,6 +509,8 @@ pub enum PlayerActionType {
     BuyItem { shop_id: u32, index: usize },
     SellItem { index: usize, shop_id: u32 },
     Interact,
+    UseAbility { ability_id: String, target: Option<Position> },
+    Craft { weapon_idx: u32, scroll_idx: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,6 +519,41 @@ pub enum LevelUpChoice {
     Attack,
     Defense,
     Speed,
+    Cleave,
+    Fortify,
+    Backstab,
+    Evasion,
+    SpellPower,
+    ManaRegen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlayerClass {
+    Warrior,
+    Rogue,
+    Mage,
+}
+
+impl Default for PlayerClass {
+    fn default() -> Self {
+        PlayerClass::Warrior
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ElitePrefix {
+    Frenzied,
+    Armored,
+    Venomous,
+    Spectral,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunModifier {
+    GlassCannon,
+    Marathon,
+    Pacifist,
+    Cursed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -539,6 +586,7 @@ pub struct GameState {
     pub pending_level_up: bool,
     pub biome: Biome,
     pub seed: u64,
+    pub level_up_choices: Vec<LevelUpChoice>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -556,6 +604,20 @@ pub struct PlayerState {
     pub inventory: Vec<ItemView>,
     pub equipment: EquipmentView,
     pub status_effects: Vec<StatusView>,
+    pub player_class: PlayerClass,
+    pub mana: i32,
+    pub max_mana: i32,
+    pub abilities: Vec<AbilityView>,
+    pub hunger: i32,
+    pub max_hunger: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbilityView {
+    pub id: String,
+    pub name: String,
+    pub mana_cost: i32,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -576,6 +638,9 @@ pub struct EntityView {
     pub glyph: u32,
     pub hp: Option<(i32, i32)>,
     pub flavor_text: Option<String>,
+    pub status_effects: Vec<StatusView>,
+    pub elite: Option<String>,
+    pub is_ally: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -585,6 +650,7 @@ pub struct ItemView {
     pub item_type: ItemType,
     pub slot: Option<EquipSlot>,
     pub charges: Option<u32>,
+    pub identified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -640,6 +706,8 @@ pub enum GameEvent {
         target_id: u32,
         damage: i32,
         killed: bool,
+        damage_type: String,
+        dodged: bool,
     },
     DamageTaken {
         entity_id: u32,
@@ -740,6 +808,33 @@ pub enum GameEvent {
     AchievementUnlocked {
         name: String,
     },
+    AbilityUsed {
+        name: String,
+        position: Position,
+        targets: Vec<Position>,
+    },
+    ManaChanged {
+        amount: i32,
+    },
+    HungerChanged {
+        level: i32,
+    },
+    SecretRoomFound {
+        position: Position,
+    },
+    ItemEnchanted {
+        item_name: String,
+        new_level: i32,
+    },
+    BossSummon {
+        boss_name: String,
+        summoned: Vec<String>,
+    },
+    BossCharge {
+        boss_id: u32,
+        from: Position,
+        to: Position,
+    },
     Victory,
 }
 
@@ -763,6 +858,8 @@ pub struct RunSummary {
     pub cause_of_death: Option<String>,
     pub victory: bool,
     pub timestamp: String,
+    pub class: String,
+    pub modifiers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -773,6 +870,7 @@ pub struct HighScore {
     pub seed: String,
     pub timestamp: String,
     pub victory: bool,
+    pub class: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -823,4 +921,24 @@ pub struct OllamaStatus {
     pub available: bool,
     pub model_loaded: bool,
     pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LifetimeStats {
+    pub total_runs: u32,
+    pub total_kills: u32,
+    pub total_deaths: u32,
+    pub total_victories: u32,
+    pub floors_explored: u32,
+    pub favorite_class: String,
+    pub average_score: f64,
+    pub win_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyStatus {
+    pub date: String,
+    pub played: bool,
+    pub score: Option<u32>,
+    pub floor_reached: Option<u32>,
 }

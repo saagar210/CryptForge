@@ -12,3 +12,5 @@ pub mod items;
 pub mod enemies;
 pub mod level;
 pub mod achievements;
+pub mod classes;
+pub mod abilities;

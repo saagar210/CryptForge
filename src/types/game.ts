@@ -29,7 +29,11 @@ export type StatusType =
 
 export type LogSeverity = "Info" | "Warning" | "Danger" | "Good";
 
-export type LevelUpChoice = "MaxHp" | "Attack" | "Defense" | "Speed";
+export type LevelUpChoice = "MaxHp" | "Attack" | "Defense" | "Speed" | "Cleave" | "Fortify" | "Backstab" | "Evasion" | "SpellPower" | "ManaRegen";
+
+export type PlayerClass = "Warrior" | "Rogue" | "Mage";
+
+export type RunModifier = "GlassCannon" | "Marathon" | "Pacifist" | "Cursed";
 
 // --- Action types (sent to backend) ---
 
@@ -48,7 +52,9 @@ export type PlayerActionType =
   | { RangedAttack: { target_id: number } }
   | { BuyItem: { shop_id: number; index: number } }
   | { SellItem: { index: number; shop_id: number } }
-  | "Interact";
+  | "Interact"
+  | { UseAbility: { ability_id: string; target: Position | null } }
+  | { Craft: { weapon_idx: number; scroll_idx: number } };
 
 export interface PlayerAction {
   action_type: PlayerActionType;
@@ -76,6 +82,7 @@ export interface GameState {
   pending_level_up: boolean;
   biome: Biome;
   seed: number;
+  level_up_choices: LevelUpChoice[];
 }
 
 export interface PlayerState {
@@ -92,6 +99,19 @@ export interface PlayerState {
   inventory: ItemView[];
   equipment: EquipmentView;
   status_effects: StatusView[];
+  player_class: PlayerClass;
+  mana: number;
+  max_mana: number;
+  abilities: AbilityView[];
+  hunger: number;
+  max_hunger: number;
+}
+
+export interface AbilityView {
+  id: string;
+  name: string;
+  mana_cost: number;
+  description: string;
 }
 
 export interface VisibleTile {
@@ -110,6 +130,9 @@ export interface EntityView {
   glyph: number;
   hp: [number, number] | null;
   flavor_text: string | null;
+  status_effects: StatusView[];
+  elite: string | null;
+  is_ally: boolean;
 }
 
 export interface ItemView {
@@ -118,6 +141,7 @@ export interface ItemView {
   item_type: ItemType;
   slot: EquipSlot | null;
   charges: number | null;
+  identified: boolean;
 }
 
 export interface EquipmentView {
@@ -153,7 +177,7 @@ export interface MinimapData {
 
 export type GameEvent =
   | { Moved: { entity_id: number; from: Position; to: Position } }
-  | { Attacked: { attacker_id: number; target_id: number; damage: number; killed: boolean } }
+  | { Attacked: { attacker_id: number; target_id: number; damage: number; killed: boolean; damage_type: string; dodged: boolean } }
   | { DamageTaken: { entity_id: number; amount: number; source: string } }
   | { Healed: { entity_id: number; amount: number } }
   | { ItemPickedUp: { item: ItemView } }
@@ -180,6 +204,13 @@ export type GameEvent =
   | { ChestOpened: { position: Position; items: string[]; trapped: boolean } }
   | { AltarOffering: { item_name: string; stat_gained: string } }
   | { AchievementUnlocked: { name: string } }
+  | { AbilityUsed: { name: string; position: Position; targets: Position[] } }
+  | { ManaChanged: { amount: number } }
+  | { HungerChanged: { level: number } }
+  | { SecretRoomFound: { position: Position } }
+  | { ItemEnchanted: { item_name: string; new_level: number } }
+  | { BossSummon: { boss_name: string; summoned: string[] } }
+  | { BossCharge: { boss_id: number; from: Position; to: Position } }
   | "Victory";
 
 // --- Game over ---
@@ -202,6 +233,8 @@ export interface RunSummary {
   cause_of_death: string | null;
   victory: boolean;
   timestamp: string;
+  class: string;
+  modifiers: string[];
 }
 
 export interface HighScore {
@@ -211,6 +244,7 @@ export interface HighScore {
   seed: string;
   timestamp: string;
   victory: boolean;
+  class: string;
 }
 
 export interface ShopItem {
@@ -272,4 +306,21 @@ export interface AchievementStatus {
   unlocked: boolean;
 }
 
-export type AppScreen = "menu" | "game" | "death" | "victory" | "highscores" | "history" | "settings" | "achievements";
+export interface DailyStatus {
+  date: string;
+  played: boolean;
+  score: number | null;
+  floor_reached: number | null;
+}
+
+export interface UnlockStatus {
+  achievement_id: string;
+  achievement_name: string;
+  reward_item: string;
+  description: string;
+  unlocked: boolean;
+}
+
+export type LifetimeStats = Record<string, number>;
+
+export type AppScreen = "menu" | "game" | "death" | "victory" | "highscores" | "history" | "settings" | "achievements" | "classSelect" | "statistics";

@@ -24,6 +24,7 @@ interface InputActions {
   onTargetMove?: (dir: Direction) => void;
   onTargetCycleNext?: () => void;
   onTargetConfirm?: () => void;
+  onUseAbility?: (index: number) => void;
 }
 
 const KEY_TO_DIRECTION: Record<string, Direction> = {
@@ -120,6 +121,13 @@ export function useInput(mode: InputMode, actions: InputActions, enabled: boolea
           actions.onEnterTargeting?.();
           return;
         }
+        // Ability hotkeys 1-4
+        const abilityNum = parseInt(key);
+        if (abilityNum >= 1 && abilityNum <= 4) {
+          event.preventDefault();
+          actions.onUseAbility?.(abilityNum - 1);
+          return;
+        }
       }
 
       if (mode === "targeting") {
@@ -158,16 +166,16 @@ export function useInput(mode: InputMode, actions: InputActions, enabled: boolea
       }
 
       if (mode === "levelup") {
-        const choices: Record<string, LevelUpChoice> = {
-          "1": "MaxHp",
-          "2": "Attack",
-          "3": "Defense",
-          "4": "Speed",
-        };
-        const choice = choices[key];
-        if (choice) {
+        // Dynamic level-up choices: 1-based index mapped by onLevelUpChoice
+        const num = parseInt(key);
+        if (num >= 1 && num <= 9) {
           event.preventDefault();
-          actions.onLevelUpChoice(choice);
+          // The modal handles index→choice mapping; use fallback mapping for backwards compat
+          const fallback: Record<string, LevelUpChoice> = { "1": "MaxHp", "2": "Attack", "3": "Defense", "4": "Speed" };
+          const choice = fallback[key];
+          if (choice) {
+            actions.onLevelUpChoice(choice);
+          }
           return;
         }
       }

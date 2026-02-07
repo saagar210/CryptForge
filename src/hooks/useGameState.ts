@@ -8,6 +8,8 @@ import type {
   LevelUpChoice,
   EquipSlot,
   PlayerAction,
+  PlayerClass,
+  Position,
 } from "../types/game";
 import * as api from "../lib/api";
 
@@ -16,7 +18,7 @@ interface UseGameStateReturn {
   gameOver: GameOverInfo | null;
   events: GameEvent[];
   loading: boolean;
-  startNewGame: (seed?: string) => Promise<void>;
+  startNewGame: (seed?: string, playerClass?: PlayerClass, modifiers?: string[]) => Promise<void>;
   continueGame: () => Promise<boolean>;
   move: (dir: Direction) => Promise<void>;
   wait: () => Promise<void>;
@@ -32,9 +34,12 @@ interface UseGameStateReturn {
   rangedAttack: (targetId: number) => Promise<void>;
   buyItem: (shopId: number, index: number) => Promise<void>;
   sellItem: (index: number, shopId: number) => Promise<void>;
+  useAbility: (abilityId: string, target?: Position | null) => Promise<void>;
+  craftItem: (weaponIdx: number, scrollIdx: number) => Promise<void>;
   startAutoExplore: () => Promise<void>;
   cancelAutoExplore: () => void;
   saveGame: () => Promise<void>;
+  handleResult: (result: TurnResult) => void;
 }
 
 export function useGameState(): UseGameStateReturn {
@@ -49,10 +54,10 @@ export function useGameState(): UseGameStateReturn {
     setGameOver(result.game_over);
   }, []);
 
-  const startNewGame = useCallback(async (seed?: string) => {
+  const startNewGame = useCallback(async (seed?: string, playerClass?: PlayerClass, modifiers?: string[]) => {
     setLoading(true);
     try {
-      const result = await api.newGame(seed);
+      const result = await api.newGame(seed, playerClass, modifiers);
       handleResult(result);
     } finally {
       setLoading(false);
@@ -96,6 +101,8 @@ export function useGameState(): UseGameStateReturn {
   const rangedAttack = useCallback((targetId: number) => doAction(api.rangedAttackAction(targetId)), [doAction]);
   const buyItem = useCallback((shopId: number, index: number) => doAction(api.buyItemAction(shopId, index)), [doAction]);
   const sellItem = useCallback((index: number, shopId: number) => doAction(api.sellItemAction(index, shopId)), [doAction]);
+  const useAbility = useCallback((abilityId: string, target?: Position | null) => doAction(api.useAbilityAction(abilityId, target)), [doAction]);
+  const craftItem = useCallback((weaponIdx: number, scrollIdx: number) => doAction(api.craftAction(weaponIdx, scrollIdx)), [doAction]);
 
   const autoExploreRef = useRef(false);
 
@@ -157,8 +164,11 @@ export function useGameState(): UseGameStateReturn {
     rangedAttack,
     buyItem,
     sellItem,
+    useAbility,
+    craftItem,
     startAutoExplore,
     cancelAutoExplore,
     saveGame,
+    handleResult,
   };
 }

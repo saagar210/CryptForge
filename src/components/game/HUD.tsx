@@ -19,11 +19,15 @@ export function HUD({ player, floor, turn, seed }: HUDProps) {
   };
   const hpPct = player.max_hp > 0 ? (player.hp / player.max_hp) * 100 : 0;
   const xpPct = player.xp_to_next > 0 ? (player.xp / player.xp_to_next) * 100 : 0;
+  const manaPct = player.max_mana > 0 ? (player.mana / player.max_mana) * 100 : 0;
+  const hungerPct = player.max_hunger > 0 ? (player.hunger / player.max_hunger) * 100 : 0;
   const hpColor = hpPct > 60 ? "#44FF44" : hpPct > 30 ? "#FFAA00" : "#FF4444";
+  const hungerColor = hungerPct > 50 ? "#44FF44" : hungerPct > 25 ? "#FFAA00" : "#FF4444";
 
   return (
     <div style={styles.container}>
       <div style={styles.row}>
+        <span style={styles.label}>{player.player_class} </span>
         <span style={styles.label}>Floor {floor}</span>
         <span style={styles.label}>Turn {turn}</span>
         <span
@@ -49,6 +53,24 @@ export function HUD({ player, floor, turn, seed }: HUDProps) {
           <div style={{ ...styles.barFill, width: `${xpPct}%`, backgroundColor: "#8888FF" }} />
         </div>
         <span style={styles.value}>Lv{player.level}</span>
+      </div>
+
+      {player.max_mana > 0 && (
+        <div style={styles.row}>
+          <span style={styles.label}>MP</span>
+          <div style={styles.barBg}>
+            <div style={{ ...styles.barFill, width: `${manaPct}%`, backgroundColor: "#4488FF" }} />
+          </div>
+          <span style={styles.value}>{player.mana}/{player.max_mana}</span>
+        </div>
+      )}
+
+      <div style={styles.row}>
+        <span style={styles.label}>Food</span>
+        <div style={styles.barBg}>
+          <div style={{ ...styles.barFill, width: `${hungerPct}%`, backgroundColor: hungerColor }} />
+        </div>
+        <span style={styles.value}>{hungerPct > 50 ? "Full" : hungerPct > 25 ? "Hungry" : "Starving"}</span>
       </div>
 
       <div style={styles.stats}>

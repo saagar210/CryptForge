@@ -11,6 +11,14 @@ pub enum AIAction {
     MoveAway(Position),
     MoveRandom,
     Wait,
+    /// Goblin King: summon minions. Bool = true means summon archers (Phase 2).
+    BossSummon { summon_archers: bool },
+    /// Troll Warlord: charge to adjacent tile and attack with 2x damage. Bool = stun (Phase 2).
+    BossCharge { stun: bool },
+    /// The Lich: teleport away from player and leave fire at old position.
+    BossTeleport,
+    /// The Lich Phase 2: ranged frost bolt attack.
+    BossFrostBolt,
 }
 
 /// Given an entity's state and the world context, decide what action to take.
@@ -60,6 +68,9 @@ pub fn decide_action(
         Some(AIBehavior::Passive) => AIAction::Wait,
         Some(AIBehavior::Fleeing) => decide_flee(entity, dijkstra, map, entities),
         Some(AIBehavior::Boss(phase)) => decide_boss(entity, player, *phase, distance, hp_pct, dijkstra, map, entities),
+        Some(AIBehavior::Ally { follow_distance }) => {
+            decide_ally(entity, player_pos, distance, *follow_distance, dijkstra, map, entities)
+        }
         None => AIAction::Wait,
     }
 }
@@ -147,23 +158,163 @@ fn decide_flee(
     }
 }
 
+fn decide_ally(
+    entity: &Entity,
+    _player_pos: Position,
+    distance: i32,
+    follow_distance: i32,
+    dijkstra: &Option<DijkstraMap>,
+    map: &Map,
+    entities: &[Entity],
+) -> AIAction {
+    // If enemy adjacent, attack it
+    let adjacent_enemy = entities.iter().find(|e| {
+        e.id != entity.id
+            && e.id != 0 // not player
+            && e.combat.is_some()
+            && e.health.as_ref().map_or(false, |h| h.current > 0)
+            && !matches!(&e.ai, Some(AIBehavior::Ally { .. }))
+            && e.ai.is_some()
+            && entity.position.chebyshev_distance(&e.position) <= 1
+    });
+
+    if let Some(enemy) = adjacent_enemy {
+        return AIAction::MeleeAttack(enemy.id);
+    }
+
+    // Follow player if too far
+    if distance > follow_distance {
+        if let Some(next_pos) = toward_position(entity.position, dijkstra, map, entities, entity.id) {
+            return AIAction::MoveToward(next_pos);
+        }
+    }
+
+    AIAction::Wait
+}
+
 fn decide_boss(
     entity: &Entity,
     _player: &Entity,
-    _phase: BossPhase,
+    phase: BossPhase,
     distance: i32,
     _hp_pct: f32,
     dijkstra: &Option<DijkstraMap>,
     map: &Map,
     entities: &[Entity],
 ) -> AIAction {
-    // Bosses always try to attack
+    let is_phase2 = phase == BossPhase::Phase2;
+    let name = entity.name.as_str();
+
+    match name {
+        "Goblin King" => decide_boss_goblin_king(entity, is_phase2, distance, dijkstra, map, entities),
+        "Troll Warlord" => decide_boss_troll_warlord(entity, _player, is_phase2, distance, dijkstra, map, entities),
+        "The Lich" => decide_boss_lich(entity, _player, is_phase2, distance, dijkstra, map, entities),
+        _ => {
+            // Generic boss fallback
+            if distance <= 1 {
+                return AIAction::MeleeAttack(0);
+            }
+            if let Some(next_pos) = toward_position(entity.position, dijkstra, map, entities, entity.id) {
+                AIAction::MoveToward(next_pos)
+            } else {
+                AIAction::Wait
+            }
+        }
+    }
+}
+
+/// Goblin King (floor 3):
+/// - Every 4 turns summon 1-2 Goblins
+/// - Phase 2 (below 50% HP): summon Archers every 3 turns
+/// The action counter check happens in state.rs; here we just return the summon action
+/// when appropriate, falling back to melee/move behavior.
+/// State.rs increments the counter and checks the interval.
+fn decide_boss_goblin_king(
+    entity: &Entity,
+    _is_phase2: bool,
+    distance: i32,
+    dijkstra: &Option<DijkstraMap>,
+    map: &Map,
+    entities: &[Entity],
+) -> AIAction {
+    // The summon decision is driven by the counter in state.rs.
+    // From the AI perspective, we return the standard melee behavior.
+    // State.rs will check the counter and override with BossSummon when it's time.
+    // We signal readiness to summon by returning BossSummon; state.rs decides interval.
+    // Actually, we can't access the counter here. Return a marker that state.rs interprets.
+    // Strategy: always return normal melee behavior. state.rs wraps this with summon logic.
     if distance <= 1 {
         return AIAction::MeleeAttack(0);
     }
 
-    // Boss with ranged capability (e.g., The Lich teleports when adjacent)
-    // For now, all bosses are melee-focused
+    if let Some(next_pos) = toward_position(entity.position, dijkstra, map, entities, entity.id) {
+        AIAction::MoveToward(next_pos)
+    } else {
+        AIAction::Wait
+    }
+}
+
+/// Troll Warlord (floor 6):
+/// - At range 2-4: charge (move to adjacent + attack 2x damage)
+/// - Phase 2: charge also stuns 1 turn
+fn decide_boss_troll_warlord(
+    entity: &Entity,
+    _player: &Entity,
+    is_phase2: bool,
+    distance: i32,
+    dijkstra: &Option<DijkstraMap>,
+    map: &Map,
+    entities: &[Entity],
+) -> AIAction {
+    if distance <= 1 {
+        return AIAction::MeleeAttack(0);
+    }
+
+    // Charge range: 2-4 tiles away
+    if distance >= 2 && distance <= 4 {
+        return AIAction::BossCharge { stun: is_phase2 };
+    }
+
+    // Otherwise close distance
+    if let Some(next_pos) = toward_position(entity.position, dijkstra, map, entities, entity.id) {
+        AIAction::MoveToward(next_pos)
+    } else {
+        AIAction::Wait
+    }
+}
+
+/// The Lich (floor 10):
+/// - If player adjacent: teleport 4-6 tiles away + leave Fire tile at old position
+/// - Phase 2: also cast ranged frost bolt
+fn decide_boss_lich(
+    entity: &Entity,
+    player: &Entity,
+    is_phase2: bool,
+    distance: i32,
+    dijkstra: &Option<DijkstraMap>,
+    map: &Map,
+    entities: &[Entity],
+) -> AIAction {
+    // If player is adjacent, teleport away
+    if distance <= 1 {
+        return AIAction::BossTeleport;
+    }
+
+    // Phase 2: try frost bolt at range if we have LOS
+    if is_phase2 && distance <= 6 && distance >= 2 {
+        if has_line_of_sight(map, entity.position, player.position) {
+            return AIAction::BossFrostBolt;
+        }
+    }
+
+    // Ranged attack if in range (Lich has innate ranged)
+    if distance <= 6 && distance >= 2 {
+        if has_line_of_sight(map, entity.position, player.position) {
+            return AIAction::RangedAttack(0);
+        }
+    }
+
+    // Close distance
     if let Some(next_pos) = toward_position(entity.position, dijkstra, map, entities, entity.id) {
         AIAction::MoveToward(next_pos)
     } else {
@@ -278,6 +429,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -298,6 +450,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         }
     }
 
@@ -316,6 +470,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -332,6 +487,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         }
     }
 
@@ -443,5 +600,156 @@ mod tests {
         let mut entity = make_entity_with_ai(1, Position::new(10, 10), AIBehavior::Passive, 20, 20);
         activate_passive(&mut entity);
         assert!(matches!(entity.ai, Some(AIBehavior::Melee)));
+    }
+
+    fn make_named_boss(name: &str, id: EntityId, pos: Position, phase: BossPhase, hp: i32, max_hp: i32) -> Entity {
+        let mut entity = make_entity_with_ai(id, pos, AIBehavior::Boss(phase), hp, max_hp);
+        entity.name = name.to_string();
+        entity
+    }
+
+    // --- Goblin King tests ---
+
+    #[test]
+    fn goblin_king_melee_when_adjacent() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        let boss = make_named_boss("Goblin King", 1, Position::new(11, 10), BossPhase::Phase1, 80, 80);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::MeleeAttack(_)));
+    }
+
+    #[test]
+    fn goblin_king_moves_toward_when_far() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        let boss = make_named_boss("Goblin King", 1, Position::new(15, 10), BossPhase::Phase1, 80, 80);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::MoveToward(_)));
+    }
+
+    // --- Troll Warlord tests ---
+
+    #[test]
+    fn troll_warlord_charges_at_range_2_to_4() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        // Distance 3 (within charge range 2-4)
+        let boss = make_named_boss("Troll Warlord", 1, Position::new(13, 10), BossPhase::Phase1, 150, 150);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::BossCharge { stun: false }));
+    }
+
+    #[test]
+    fn troll_warlord_charge_stuns_in_phase2() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        let boss = make_named_boss("Troll Warlord", 1, Position::new(13, 10), BossPhase::Phase2, 50, 150);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::BossCharge { stun: true }));
+    }
+
+    #[test]
+    fn troll_warlord_melee_when_adjacent() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        let boss = make_named_boss("Troll Warlord", 1, Position::new(11, 10), BossPhase::Phase1, 150, 150);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::MeleeAttack(_)));
+    }
+
+    #[test]
+    fn troll_warlord_moves_when_out_of_charge_range() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        // Distance 6 (beyond charge range of 4)
+        let boss = make_named_boss("Troll Warlord", 1, Position::new(16, 10), BossPhase::Phase1, 150, 150);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::MoveToward(_)));
+    }
+
+    // --- The Lich tests ---
+
+    #[test]
+    fn lich_teleports_when_adjacent() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        let boss = make_named_boss("The Lich", 1, Position::new(11, 10), BossPhase::Phase1, 120, 120);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::BossTeleport));
+    }
+
+    #[test]
+    fn lich_ranged_attack_at_distance() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        // Distance 4 (within ranged range 2-6), Phase 1 -> regular ranged
+        let boss = make_named_boss("The Lich", 1, Position::new(14, 10), BossPhase::Phase1, 120, 120);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::RangedAttack(_)));
+    }
+
+    #[test]
+    fn lich_frost_bolt_in_phase2() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        // Distance 4, Phase 2 -> frost bolt takes priority
+        let boss = make_named_boss("The Lich", 1, Position::new(14, 10), BossPhase::Phase2, 40, 120);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::BossFrostBolt));
+    }
+
+    #[test]
+    fn lich_moves_toward_when_out_of_range() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        // Distance 8 (beyond range 6)
+        let boss = make_named_boss("The Lich", 1, Position::new(18, 10), BossPhase::Phase1, 120, 120);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::MoveToward(_)));
+    }
+
+    // --- Generic boss fallback test ---
+
+    #[test]
+    fn unknown_boss_melee_when_adjacent() {
+        let map = make_open_map();
+        let player = make_player_entity(Position::new(10, 10));
+        let boss = make_named_boss("Unknown Boss", 1, Position::new(11, 10), BossPhase::Phase1, 100, 100);
+        let entities = vec![player.clone(), boss.clone()];
+        let dijkstra = Some(DijkstraMap::compute(&map, &[player.position]));
+
+        let action = decide_action(&boss, &player, &dijkstra, &map, &entities);
+        assert!(matches!(action, AIAction::MeleeAttack(_)));
     }
 }

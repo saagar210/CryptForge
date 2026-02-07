@@ -3,6 +3,7 @@ import type {
   TurnResult,
   GameState,
   PlayerAction,
+  PlayerClass,
   EntityDetail,
   RunSummary,
   HighScore,
@@ -10,15 +11,23 @@ import type {
   OllamaStatus,
   ShopData,
   AchievementStatus,
+  UnlockStatus,
+  LifetimeStats,
+  DailyStatus,
   Direction,
   EquipSlot,
   LevelUpChoice,
+  Position,
 } from "../types/game";
 
 // --- Game commands ---
 
-export async function newGame(seed?: string): Promise<TurnResult> {
-  return invoke<TurnResult>("new_game", { seed: seed ?? null });
+export async function newGame(seed?: string, playerClass?: PlayerClass, modifiers?: string[]): Promise<TurnResult> {
+  return invoke<TurnResult>("new_game", {
+    seed: seed ?? null,
+    class: playerClass ?? null,
+    modifiers: modifiers ?? null,
+  });
 }
 
 export async function playerAction(action: PlayerAction): Promise<TurnResult> {
@@ -143,4 +152,38 @@ export function sellItemAction(index: number, shopId: number): PlayerAction {
 
 export async function getAchievements(): Promise<AchievementStatus[]> {
   return invoke<AchievementStatus[]>("get_achievements");
+}
+
+// --- Unlockables ---
+
+export async function getUnlockables(): Promise<UnlockStatus[]> {
+  return invoke<UnlockStatus[]>("get_unlockables");
+}
+
+// --- Statistics ---
+
+export async function getStatistics(): Promise<LifetimeStats> {
+  return invoke<LifetimeStats>("get_statistics");
+}
+
+// --- Ability action helper ---
+
+export function useAbilityAction(abilityId: string, target?: Position | null): PlayerAction {
+  return { action_type: { UseAbility: { ability_id: abilityId, target: target ?? null } } };
+}
+
+// --- Craft action helper ---
+
+export function craftAction(weaponIdx: number, scrollIdx: number): PlayerAction {
+  return { action_type: { Craft: { weapon_idx: weaponIdx, scroll_idx: scrollIdx } } };
+}
+
+// --- Daily Challenge ---
+
+export async function startDailyChallenge(): Promise<TurnResult> {
+  return invoke<TurnResult>("start_daily_challenge");
+}
+
+export async function getDailyStatus(): Promise<DailyStatus> {
+  return invoke<DailyStatus>("get_daily_status");
 }

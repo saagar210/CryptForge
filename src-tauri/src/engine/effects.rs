@@ -151,6 +151,7 @@ mod tests {
                 base_defense: 2,
                 base_speed: 100,
                 crit_chance: 0.05,
+                dodge_chance: 0.0,
                 ranged: None,
                 on_hit: None,
             }),
@@ -167,6 +168,8 @@ mod tests {
             flavor_text: None,
             shop: None,
             interactive: None,
+            elite: None,
+            resurrection_timer: None,
         }
     }
 

@@ -1,20 +1,19 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { hasSaveGame } from "../../lib/api";
 
 interface MainMenuProps {
-  onNewGame: (seed?: string) => void;
+  onNewGame: () => void;
   onContinue: () => void;
+  onDailyChallenge: () => void;
   onHighScores: () => void;
   onRunHistory: () => void;
   onAchievements: () => void;
+  onStatistics: () => void;
   onSettings: () => void;
 }
 
-export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, onAchievements, onSettings }: MainMenuProps) {
+export function MainMenu({ onNewGame, onContinue, onDailyChallenge, onHighScores, onRunHistory, onAchievements, onStatistics, onSettings }: MainMenuProps) {
   const [hasSave, setHasSave] = useState(false);
-  const [seedInput, setSeedInput] = useState("");
-  const [showSeed, setShowSeed] = useState(false);
-
   useEffect(() => {
     hasSaveGame().then(setHasSave).catch(() => setHasSave(false));
   }, []);
@@ -25,7 +24,7 @@ export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, on
       <p style={styles.subtitle}>A Roguelike Dungeon Crawler</p>
 
       <div style={styles.menu}>
-        <button style={styles.btn} onClick={() => onNewGame(seedInput || undefined)}>
+        <button style={styles.btn} onClick={onNewGame}>
           New Game
         </button>
 
@@ -35,22 +34,9 @@ export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, on
           </button>
         )}
 
-        <button style={styles.btnSmall} onClick={() => setShowSeed(!showSeed)}>
-          {showSeed ? "Hide Seed" : "Custom Seed"}
+        <button style={styles.btn} onClick={onDailyChallenge}>
+          Daily Challenge
         </button>
-
-        {showSeed && (
-          <input
-            style={styles.input}
-            type="text"
-            placeholder="Enter seed (number or text)"
-            value={seedInput}
-            onChange={(e) => setSeedInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onNewGame(seedInput || undefined);
-            }}
-          />
-        )}
 
         <div style={styles.divider} />
 
@@ -62,6 +48,9 @@ export function MainMenu({ onNewGame, onContinue, onHighScores, onRunHistory, on
         </button>
         <button style={styles.btnSmall} onClick={onAchievements}>
           Achievements
+        </button>
+        <button style={styles.btnSmall} onClick={onStatistics}>
+          Statistics
         </button>
         <button style={styles.btnSmall} onClick={onSettings}>
           Settings

@@ -41,6 +41,10 @@ pub fn run() {
             commands::check_ollama,
             commands::get_adjacent_shop,
             commands::get_achievements,
+            commands::get_unlockables,
+            commands::get_statistics,
+            commands::start_daily_challenge,
+            commands::get_daily_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CryptForge");

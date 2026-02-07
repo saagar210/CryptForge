@@ -15,6 +15,10 @@ const COLORS: Record<string, string> = {
 
 const EXPLORED_ALPHA = 0.35;
 
+// FOV transition alpha map — smooth fade in/out
+const tileAlphaMap = new Map<string, number>();
+const FOV_LERP_SPEED = 0.15;
+
 // Entity colors by type
 const ENTITY_COLORS: Record<string, string> = {
   Player: "#FFD700",
@@ -129,6 +133,11 @@ let shakeDecay = 0;
 let shakeStartTime = 0;
 const SHAKE_DURATION = 150;
 
+/** Clear FOV alpha map (call on floor change). */
+export function clearFovAlphaMap(): void {
+  tileAlphaMap.clear();
+}
+
 export function triggerShake(intensity: number): void {
   shakeOffsetX = (Math.random() - 0.5) * 2 * intensity;
   shakeOffsetY = (Math.random() - 0.5) * 2 * intensity;
@@ -187,9 +196,13 @@ export function renderFrame(
 
     if (!tile.visible && !tile.explored) continue;
 
-    if (!tile.visible) {
-      ctx.globalAlpha = EXPLORED_ALPHA;
-    }
+    // Smooth FOV transitions
+    const key = `${tile.x},${tile.y}`;
+    const targetAlpha = tile.visible ? 1.0 : tile.explored ? EXPLORED_ALPHA : 0.0;
+    const currentAlpha = tileAlphaMap.get(key) ?? targetAlpha;
+    const newAlpha = currentAlpha + (targetAlpha - currentAlpha) * FOV_LERP_SPEED;
+    tileAlphaMap.set(key, newAlpha);
+    ctx.globalAlpha = newAlpha;
 
     if (useSprites) {
       const sprite = getTileSprite(tile.tile_type);
@@ -252,8 +265,32 @@ export function renderFrame(
       ctx.fillText(glyph, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
     }
 
-    // HP bar for enemies
-    if (entity.entity_type === "Enemy" && entity.hp) {
+    // Elite glow
+    if (entity.elite) {
+      const eliteColors: Record<string, string> = {
+        Frenzied: "#FF4444",
+        Armored: "#CCCCCC",
+        Venomous: "#44FF44",
+        Spectral: "#AA44FF",
+      };
+      const glowColor = eliteColors[entity.elite] ?? "#FFFFFF";
+      ctx.globalAlpha = 0.3 + Math.sin(performance.now() / 300) * 0.15;
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(screenX + 1, screenY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // Ally tint
+    if (entity.is_ally && entity.entity_type === "Enemy") {
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = "#00CCFF";
+      ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+      ctx.globalAlpha = 1;
+    }
+
+    // HP bar for enemies and allies
+    if ((entity.entity_type === "Enemy" || entity.is_ally) && entity.hp) {
       const [current, max] = entity.hp;
       const barWidth = TILE_SIZE - 4;
       const barHeight = 3;
@@ -263,7 +300,9 @@ export function renderFrame(
 
       ctx.fillStyle = "#333";
       ctx.fillRect(barX, barY, barWidth, barHeight);
-      ctx.fillStyle = current / max > 0.5 ? "#44FF44" : current / max > 0.25 ? "#FFAA00" : "#FF4444";
+      ctx.fillStyle = entity.is_ally
+        ? "#44AAFF"
+        : current / max > 0.5 ? "#44FF44" : current / max > 0.25 ? "#FFAA00" : "#FF4444";
       ctx.fillRect(barX, barY, fillWidth, barHeight);
     }
   }

@@ -172,6 +172,54 @@ fn compute_progress(def: &AchievementDef, world: &World, events: &[GameEvent], d
     }
 }
 
+// --- Unlockable rewards ---
+
+pub struct UnlockReward {
+    pub achievement_id: &'static str,
+    pub reward_item: &'static str,
+    pub description: &'static str,
+}
+
+pub const UNLOCK_REWARDS: &[UnlockReward] = &[
+    UnlockReward { achievement_id: "win_game", reward_item: "Blessed Sword", description: "Start with a Blessed Sword" },
+    UnlockReward { achievement_id: "kill_500", reward_item: "Veteran's Ring", description: "Start with Veteran's Ring (+2 ATK)" },
+    UnlockReward { achievement_id: "reach_floor_20", reward_item: "Abyss Cloak", description: "Start with an Abyss Cloak (+3 DEF)" },
+    UnlockReward { achievement_id: "win_fast", reward_item: "Speed Boots", description: "Start with Speed Boots (+20 SPD)" },
+];
+
+/// Get list of reward item names the player has unlocked.
+pub fn get_unlocked_rewards(conn: &rusqlite::Connection) -> Vec<&'static str> {
+    UNLOCK_REWARDS.iter()
+        .filter(|r| is_unlocked(conn, r.achievement_id))
+        .map(|r| r.reward_item)
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnlockStatus {
+    pub achievement_id: String,
+    pub achievement_name: String,
+    pub reward_item: String,
+    pub description: String,
+    pub unlocked: bool,
+}
+
+pub fn get_all_unlock_statuses(conn: &rusqlite::Connection) -> Vec<UnlockStatus> {
+    UNLOCK_REWARDS.iter().map(|r| {
+        let achievement_name = ACHIEVEMENTS.iter()
+            .find(|a| a.id == r.achievement_id)
+            .map(|a| a.name)
+            .unwrap_or("Unknown");
+        UnlockStatus {
+            achievement_id: r.achievement_id.to_string(),
+            achievement_name: achievement_name.to_string(),
+            reward_item: r.reward_item.to_string(),
+            description: r.description.to_string(),
+            unlocked: is_unlocked(conn, r.achievement_id),
+        }
+    }).collect()
+}
+
 // --- DB helpers ---
 
 pub fn ensure_table(conn: &rusqlite::Connection) {

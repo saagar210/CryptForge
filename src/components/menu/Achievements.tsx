@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import type { AchievementStatus, AchievementCategory } from "../../types/game";
-import { getAchievements } from "../../lib/api";
+import type { AchievementStatus, AchievementCategory, UnlockStatus } from "../../types/game";
+import { getAchievements, getUnlockables } from "../../lib/api";
 
 interface AchievementsProps {
   onBack: () => void;
@@ -10,9 +10,11 @@ const CATEGORIES: AchievementCategory[] = ["Exploration", "Combat", "Collection"
 
 export function Achievements({ onBack }: AchievementsProps) {
   const [achievements, setAchievements] = useState<AchievementStatus[]>([]);
+  const [unlockables, setUnlockables] = useState<UnlockStatus[]>([]);
 
   useEffect(() => {
     getAchievements().then(setAchievements).catch(() => {});
+    getUnlockables().then(setUnlockables).catch(() => {});
   }, []);
 
   const grouped = CATEGORIES.map((cat) => ({
@@ -61,6 +63,26 @@ export function Achievements({ onBack }: AchievementsProps) {
           </div>
         ))}
       </div>
+
+      {unlockables.length > 0 && (
+        <div style={styles.grid}>
+          <h3 style={styles.categoryTitle}>Rewards</h3>
+          {unlockables.map((u) => (
+            <div key={u.achievement_id} style={u.unlocked ? styles.card : styles.cardLocked}>
+              <div style={styles.cardHeader}>
+                <span style={u.unlocked ? styles.rewardName : styles.nameLocked}>
+                  {u.reward_item}
+                </span>
+                {u.unlocked && <span style={styles.check}>&#10003;</span>}
+              </div>
+              <p style={styles.desc}>{u.description}</p>
+              <p style={styles.rewardReq}>
+                Requires: {u.achievement_name}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <button style={styles.btn} onClick={onBack}>
         Back
@@ -166,6 +188,17 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#666",
     minWidth: "40px",
     textAlign: "right" as const,
+  },
+  rewardName: {
+    fontSize: "14px",
+    color: "#FFD700",
+    fontWeight: "bold",
+  },
+  rewardReq: {
+    fontSize: "11px",
+    color: "#555",
+    margin: "2px 0 0",
+    fontStyle: "italic",
   },
   btn: {
     marginTop: "24px",

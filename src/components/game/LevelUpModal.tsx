@@ -2,30 +2,40 @@ import type { LevelUpChoice } from "../../types/game";
 
 interface LevelUpModalProps {
   level: number;
+  choices: LevelUpChoice[];
   onChoice: (choice: LevelUpChoice) => void;
 }
 
-const CHOICES: { key: string; choice: LevelUpChoice; label: string; desc: string }[] = [
-  { key: "1", choice: "MaxHp", label: "+10 Max HP", desc: "Increases maximum health by 10 and heals 10" },
-  { key: "2", choice: "Attack", label: "+2 Attack", desc: "Increases base attack power by 2" },
-  { key: "3", choice: "Defense", label: "+2 Defense", desc: "Increases base defense by 2" },
-  { key: "4", choice: "Speed", label: "+15 Speed", desc: "Increases action speed by 15" },
-];
+const CHOICE_INFO: Record<string, { label: string; desc: string; color?: string }> = {
+  MaxHp: { label: "+10 Max HP", desc: "Increases maximum health by 10 and heals 10" },
+  Attack: { label: "+2 Attack", desc: "Increases base attack power by 2" },
+  Defense: { label: "+2 Defense", desc: "Increases base defense by 2" },
+  Speed: { label: "+15 Speed", desc: "Increases action speed by 15" },
+  Cleave: { label: "Cleave", desc: "Attacks hit harder (+2 bonus damage)", color: "#FF4444" },
+  Fortify: { label: "Fortify", desc: "Hardens your defenses (+3 defense)", color: "#FF4444" },
+  Backstab: { label: "Backstab", desc: "Strike weak points (+5% critical chance)", color: "#44FF44" },
+  Evasion: { label: "Evasion", desc: "Dodge incoming attacks (+5% dodge chance)", color: "#44FF44" },
+  SpellPower: { label: "Spell Power", desc: "Increases spell damage (+3 spell power)", color: "#4488FF" },
+  ManaRegen: { label: "Mana Regen", desc: "Faster mana recovery (+1 per turn)", color: "#4488FF" },
+};
 
-export function LevelUpModal({ level, onChoice }: LevelUpModalProps) {
+export function LevelUpModal({ level, choices, onChoice }: LevelUpModalProps) {
   return (
     <div style={styles.overlay}>
       <div style={styles.panel}>
         <h2 style={styles.title}>Level Up!</h2>
         <p style={styles.subtitle}>You reached level {level}. Choose an upgrade:</p>
         <div style={styles.choices}>
-          {CHOICES.map((c) => (
-            <button key={c.key} style={styles.choiceBtn} onClick={() => onChoice(c.choice)}>
-              <span style={styles.choiceKey}>[{c.key}]</span>
-              <span style={styles.choiceLabel}>{c.label}</span>
-              <span style={styles.choiceDesc}>{c.desc}</span>
-            </button>
-          ))}
+          {choices.map((choice, i) => {
+            const info = CHOICE_INFO[choice] ?? { label: choice, desc: "" };
+            return (
+              <button key={choice} style={styles.choiceBtn} onClick={() => onChoice(choice)}>
+                <span style={styles.choiceKey}>[{i + 1}]</span>
+                <span style={{ ...styles.choiceLabel, color: info.color ?? "#44FF44" }}>{info.label}</span>
+                <span style={styles.choiceDesc}>{info.desc}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
