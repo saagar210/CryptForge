@@ -75,6 +75,7 @@ function App() {
         <GameView
           gameState={game.gameState}
           gameOver={game.gameOver}
+          events={game.events}
           pendingLevelUp={pendingLevelUp ?? false}
           onMove={game.move}
           onWait={game.wait}

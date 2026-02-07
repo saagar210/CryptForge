@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
-import type { GameState, Direction, LevelUpChoice, GameOverInfo } from "../../types/game";
+import type { GameState, Direction, LevelUpChoice, GameOverInfo, GameEvent } from "../../types/game";
 import { useInput, type InputMode } from "../../hooks/useInput";
+import { useAudio } from "../../hooks/useAudio";
 import { GameCanvas } from "./GameCanvas";
 import { HUD } from "./HUD";
 import { MessageLog } from "./MessageLog";
@@ -11,6 +12,7 @@ import { LevelUpModal } from "./LevelUpModal";
 interface GameViewProps {
   gameState: GameState;
   gameOver: GameOverInfo | null;
+  events: GameEvent[];
   pendingLevelUp: boolean;
   onMove: (dir: Direction) => void;
   onWait: () => void;
@@ -26,6 +28,7 @@ interface GameViewProps {
 export function GameView({
   gameState,
   gameOver: _gameOver,
+  events,
   pendingLevelUp,
   onMove,
   onWait,
@@ -70,6 +73,7 @@ export function GameView({
   );
 
   useInput(mode, inputActions, true);
+  useAudio(events, 80, 80, 50);
 
   const handleCloseInventory = useCallback(() => setShowInventory(false), []);
 
@@ -79,7 +83,7 @@ export function GameView({
 
       <div style={styles.main}>
         <div style={styles.canvasArea}>
-          <GameCanvas gameState={gameState} />
+          <GameCanvas gameState={gameState} events={events} />
         </div>
         <div style={styles.sidebar}>
           <Minimap data={gameState.minimap} />

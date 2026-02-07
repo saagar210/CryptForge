@@ -1,15 +1,26 @@
 import { useRef, useEffect, useCallback } from "react";
-import type { GameState } from "../../types/game";
+import type { GameState, GameEvent } from "../../types/game";
 import { createCamera, updateCamera, renderFrame, type Camera } from "../../lib/renderer";
+import { queueAnimationsFromEvents, updateAnimations, renderAnimations } from "../../lib/animations";
 
 interface GameCanvasProps {
   gameState: GameState;
+  events: GameEvent[];
 }
 
-export function GameCanvas({ gameState }: GameCanvasProps) {
+export function GameCanvas({ gameState, events }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera>(createCamera());
   const animFrameRef = useRef<number>(0);
+  const prevEventsRef = useRef<GameEvent[]>([]);
+
+  // Queue animations when events change
+  useEffect(() => {
+    if (events !== prevEventsRef.current && events.length > 0) {
+      prevEventsRef.current = events;
+      queueAnimationsFromEvents(events);
+    }
+  }, [events]);
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -33,6 +44,18 @@ export function GameCanvas({ gameState }: GameCanvasProps) {
       cameraRef.current,
       gameState.visible_tiles,
       gameState.visible_entities,
+    );
+
+    // Render animations on top
+    updateAnimations();
+    renderAnimations(
+      ctx,
+      canvas.width,
+      canvas.height,
+      cameraRef.current.x,
+      cameraRef.current.y,
+      32,
+      gameState.player.position,
     );
 
     animFrameRef.current = requestAnimationFrame(render);
