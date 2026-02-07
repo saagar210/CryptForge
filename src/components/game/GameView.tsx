@@ -41,7 +41,7 @@ interface GameViewProps {
 
 export function GameView({
   gameState,
-  gameOver: _gameOver,
+  // gameOver is handled by parent (DeathScreen) — not needed here
   events,
   pendingLevelUp,
   masterVolume,
@@ -97,16 +97,18 @@ export function GameView({
   // Max targeting range — backend validates actual weapon range on attack
   const weaponRange = 8;
 
-  const visibleEnemies = gameState.visible_entities.filter((e) => {
-    if (e.entity_type !== "Enemy") return false;
-    const dist = Math.max(
-      Math.abs(e.position.x - gameState.player.position.x),
-      Math.abs(e.position.y - gameState.player.position.y),
-    );
-    return dist <= weaponRange;
-  });
+  const visibleEnemies = useMemo(() =>
+    gameState.visible_entities.filter((e) => {
+      if (e.entity_type !== "Enemy") return false;
+      const dist = Math.max(
+        Math.abs(e.position.x - gameState.player.position.x),
+        Math.abs(e.position.y - gameState.player.position.y),
+      );
+      return dist <= weaponRange;
+    }), [gameState.visible_entities, gameState.player.position.x, gameState.player.position.y]
+  );
 
-  const validTargetIds = visibleEnemies.map((e) => e.id);
+  const validTargetIds = useMemo(() => visibleEnemies.map((e) => e.id), [visibleEnemies]);
 
   // Detect shop bump — check if latest messages contain shop welcome
   useEffect(() => {

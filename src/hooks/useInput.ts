@@ -72,7 +72,7 @@ export function useInput(mode: InputMode, actions: InputActions, enabled: boolea
 
       if (mode === "normal") {
         // Movement
-        const dir = KEY_TO_DIRECTION[key === " " ? "" : key] ?? KEY_TO_DIRECTION[event.code];
+        const dir = KEY_TO_DIRECTION[key] ?? KEY_TO_DIRECTION[event.code];
         if (dir) {
           event.preventDefault();
           actions.onMove(dir);
@@ -80,7 +80,7 @@ export function useInput(mode: InputMode, actions: InputActions, enabled: boolea
         }
 
         // Actions
-        if (key === "." || key === "Numpad5" || event.code === "Numpad5") {
+        if (key === " " || key === "." || key === "Numpad5" || event.code === "Numpad5") {
           event.preventDefault();
           actions.onWait();
           return;
@@ -123,7 +123,7 @@ export function useInput(mode: InputMode, actions: InputActions, enabled: boolea
       }
 
       if (mode === "targeting") {
-        const dir = KEY_TO_DIRECTION[key === " " ? "" : key] ?? KEY_TO_DIRECTION[event.code];
+        const dir = KEY_TO_DIRECTION[key] ?? KEY_TO_DIRECTION[event.code];
         if (dir) {
           event.preventDefault();
           actions.onTargetMove?.(dir);

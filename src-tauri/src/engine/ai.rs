@@ -150,17 +150,13 @@ fn decide_flee(
 fn decide_boss(
     entity: &Entity,
     _player: &Entity,
-    phase: BossPhase,
+    _phase: BossPhase,
     distance: i32,
-    hp_pct: f32,
+    _hp_pct: f32,
     dijkstra: &Option<DijkstraMap>,
     map: &Map,
     entities: &[Entity],
 ) -> AIAction {
-    // Phase transition check (< 50% HP triggers Phase2)
-    // The actual phase transition is handled in state.rs when processing the action
-    let _effective_phase = if hp_pct < 0.5 { BossPhase::Phase2 } else { phase };
-
     // Bosses always try to attack
     if distance <= 1 {
         return AIAction::MeleeAttack(0);

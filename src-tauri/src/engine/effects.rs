@@ -112,8 +112,9 @@ pub fn absorb_shield_damage(entity: &mut Entity, damage: i32) -> i32 {
         } else {
             let remaining = damage - shield.magnitude;
             shield.magnitude = 0;
-            shield.duration = 0; // Remove depleted shield
-            entity.status_effects.retain(|s| s.duration > 0 || s.effect_type != StatusType::Shielded);
+            shield.duration = 0;
+            // Remove the depleted shield immediately
+            entity.status_effects.retain(|s| !(s.effect_type == StatusType::Shielded && s.magnitude == 0));
             return remaining;
         }
     }

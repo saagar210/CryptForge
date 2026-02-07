@@ -212,10 +212,11 @@ fn set_progress(conn: &rusqlite::Connection, id: &str, progress: u32) {
 }
 
 fn unlock(conn: &rusqlite::Connection, id: &str) {
+    let progress = get_progress(conn, id);
     let _ = conn.execute(
-        "INSERT INTO achievements (id, progress, unlocked, unlocked_at) VALUES (?1, ?1, 1, datetime('now'))
+        "INSERT INTO achievements (id, progress, unlocked, unlocked_at) VALUES (?1, ?2, 1, datetime('now'))
          ON CONFLICT(id) DO UPDATE SET unlocked = 1, unlocked_at = datetime('now')",
-        rusqlite::params![id],
+        rusqlite::params![id, progress],
     );
 }
 

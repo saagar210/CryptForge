@@ -2945,24 +2945,6 @@ fn item_base_price(name: &str) -> u32 {
     }
 }
 
-/// Buy price for a shop item.
-fn item_buy_price(name: &str, floor: u32) -> u32 {
-    let all = crate::engine::items::all_items();
-    let template = all.iter().find(|t| t.name == name);
-    match template {
-        Some(t) => {
-            let base = match t.rarity {
-                crate::engine::items::Rarity::Common => 5,
-                crate::engine::items::Rarity::Uncommon => 12,
-                crate::engine::items::Rarity::Rare => 25,
-                crate::engine::items::Rarity::VeryRare => 50,
-            };
-            base + floor / 2
-        }
-        None => 10,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

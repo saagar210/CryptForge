@@ -49,24 +49,27 @@ pub fn player_action(action: PlayerAction, state: State<'_, AppState>) -> Result
     let mut result = world.resolve_turn(action);
 
     // Check achievements
-    if let Ok(db) = state.db.lock() {
-        let unlocked = achievements::check_achievements(world, &result.events, &db);
-        for name in unlocked {
-            result.events.push(GameEvent::AchievementUnlocked { name });
+    match state.db.lock() {
+        Ok(db) => {
+            let unlocked = achievements::check_achievements(world, &result.events, &db);
+            for name in unlocked {
+                result.events.push(GameEvent::AchievementUnlocked { name });
+            }
         }
+        Err(e) => eprintln!("Failed to lock db for achievements: {e}"),
     }
 
     // Auto-save every 10 turns
     if world.turn % 10 == 0 && !world.game_over {
-        if let Ok(db) = state.db.lock() {
-            let _ = save::save_world(&db, world);
+        if let Err(e) = state.db.lock().map(|db| { let _ = save::save_world(&db, world); }) {
+            eprintln!("Failed to lock db for auto-save: {e}");
         }
     }
 
     // Handle game over (death or victory — victory sets game_over = true)
     if world.game_over {
-        if let Ok(db) = state.db.lock() {
-            let _ = save::end_run(&db, world);
+        if let Err(e) = state.db.lock().map(|db| { let _ = save::end_run(&db, world); }) {
+            eprintln!("Failed to lock db for end-run: {e}");
         }
     }
 

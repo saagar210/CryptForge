@@ -35,7 +35,7 @@ pub fn effective_speed(entity: &Entity) -> i32 {
 
     let status_mod = status_speed_modifier(entity);
 
-    (base + status_mod).max(10) // minimum speed 10 to prevent softlock
+    (base + status_mod).clamp(10, 200) // 10 minimum prevents softlock, 200 cap prevents abuse
 }
 
 /// Resolve an attack between attacker and target. Returns (damage, is_crit, killed).
