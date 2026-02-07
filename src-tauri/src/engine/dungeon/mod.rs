@@ -53,7 +53,7 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
             match cycle {
                 0 => bsp::generate_bsp(&mut rng),
                 1 => cellular::generate_cellular(&mut rng),
-                _ => bsp::generate_bsp(&mut rng),
+                _ => generate_arena(&mut rng),
             }
         }
     };
@@ -72,12 +72,14 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
     // Place up stairs in start room (except floor 1)
     if floor > 1 {
         if let Some(start_room) = map.rooms.iter().find(|r| r.room_type == crate::engine::map::RoomType::Start) {
-            let pos = start_room.center();
-            // Offset slightly so up and down stairs aren't on same tile on floor 1
-            let up_x = pos.x + 1;
-            let up_y = pos.y;
-            if map.in_bounds(up_x, up_y) && map.get_tile(up_x, up_y) == TileType::Floor {
-                map.set_tile(up_x, up_y, TileType::UpStairs);
+            let center = start_room.center();
+            // Offset by 1 so up/down stairs don't collide; use find_nearest_floor
+            // to handle cellular automata rooms where center+1 may be a wall
+            let offset = crate::engine::entity::Position::new(center.x + 1, center.y);
+            let up_pos = find_nearest_floor(&map, offset);
+            // Don't place on top of existing down stairs
+            if map.get_tile(up_pos.x, up_pos.y) != TileType::DownStairs {
+                map.set_tile(up_pos.x, up_pos.y, TileType::UpStairs);
             }
         }
     }
@@ -203,5 +205,26 @@ mod tests {
         let map2 = generate_floor(seed, 1);
         assert_eq!(map1.tiles, map2.tiles);
         assert_eq!(map1.rooms.len(), map2.rooms.len());
+    }
+
+    #[test]
+    fn up_stairs_placed_on_floor_2_plus() {
+        let seed = 42u64;
+        for floor in 2..=12 {
+            let map = generate_floor(seed, floor);
+            let has_up_stairs = map.tiles.iter().any(|t| *t == TileType::UpStairs);
+            assert!(has_up_stairs, "floor {floor}: no up stairs");
+        }
+    }
+
+    #[test]
+    fn endless_mode_generates_arenas() {
+        let seed = 42u64;
+        // Floor 13 should be arena (cycle 2: (13-11)%3 = 2)
+        let map = generate_floor(seed, 13);
+        assert!(!map.rooms.is_empty(), "floor 13: no rooms");
+        // Arena has a large room (40x30)
+        let has_large_room = map.rooms.iter().any(|r| r.width >= 30 && r.height >= 20);
+        assert!(has_large_room, "floor 13: expected arena with large room");
     }
 }

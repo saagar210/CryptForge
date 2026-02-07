@@ -84,6 +84,7 @@ mod tests {
                 base_speed: 100,
                 crit_chance: 0.05,
                 ranged: None,
+                on_hit: None,
             }),
             ai: None,
             inventory: Some(Inventory::new(20)),

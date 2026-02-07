@@ -79,13 +79,14 @@ export function GameView({
         typeof e === "object" && "AchievementUnlocked" in e
       )
       .map((e) => e.AchievementUnlocked.name);
-    if (unlocked.length > 0) {
-      setToasts((prev) => [...prev, ...unlocked]);
-      // Auto-remove after 3 seconds
-      setTimeout(() => {
-        setToasts((prev) => prev.slice(unlocked.length));
-      }, 3000);
-    }
+    if (unlocked.length === 0) return;
+
+    setToasts((prev) => [...prev, ...unlocked]);
+    // Auto-remove after 3 seconds
+    const timer = setTimeout(() => {
+      setToasts((prev) => prev.slice(unlocked.length));
+    }, 3000);
+    return () => clearTimeout(timer);
   }, [events]);
 
   // Targeting helpers

@@ -3,9 +3,29 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::engine::entity::*;
-use crate::engine::enemies::{all_enemies, boss_templates, apply_endless_scaling, get_boss_for_floor, get_enemy_pool};
+use crate::engine::enemies::{all_enemies, boss_templates, apply_endless_scaling, get_boss_for_floor, get_enemy_pool, EnemySpecial};
 use crate::engine::items::all_items;
 use crate::engine::map::{Map, Room, RoomType, TileType};
+
+fn map_special_to_on_hit(special: &Option<EnemySpecial>) -> Option<OnHitEffect> {
+    match special {
+        Some(EnemySpecial::PoisonOnHit { damage, duration }) => {
+            Some(OnHitEffect::Poison { damage: *damage, duration: *duration })
+        }
+        Some(EnemySpecial::BurningOnHit { damage, duration }) => {
+            Some(OnHitEffect::Burn { damage: *damage, duration: *duration })
+        }
+        Some(EnemySpecial::SlowOnHit { magnitude, duration }) => {
+            Some(OnHitEffect::Slow { magnitude: *magnitude, duration: *duration })
+        }
+        Some(EnemySpecial::ConfuseOnHit { duration }) => {
+            Some(OnHitEffect::Confuse { duration: *duration })
+        }
+        Some(EnemySpecial::LifeSteal) => Some(OnHitEffect::LifeSteal),
+        Some(EnemySpecial::DrainMaxHp) => Some(OnHitEffect::DrainMaxHp),
+        _ => None,
+    }
+}
 
 static NEXT_ENTITY_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -29,6 +49,7 @@ pub fn spawn_player(pos: Position) -> Entity {
             base_speed: 100,
             crit_chance: 0.05,
             ranged: None,
+            on_hit: None,
         }),
         ai: None,
         inventory: Some(Inventory::new(20)),
@@ -327,6 +348,7 @@ fn create_enemy_from_template(
             base_speed: template.speed,
             crit_chance: template.crit_chance,
             ranged: None,
+            on_hit: map_special_to_on_hit(&template.special),
         }),
         ai: Some(template.ai.clone()),
         inventory: None,
@@ -368,6 +390,7 @@ fn create_item(
             item_type: t.item_type,
             slot: t.slot,
             power: t.power,
+            speed_mod: t.speed_mod,
             effect: t.effect.clone(),
             charges: t.charges,
             energy_cost: t.energy_cost,
@@ -423,6 +446,7 @@ fn pick_weighted_item(
                     item_type: t.item_type,
                     slot: t.slot,
                     power: t.power,
+                    speed_mod: t.speed_mod,
                     effect: t.effect.clone(),
                     charges: t.charges,
                     energy_cost: t.energy_cost,

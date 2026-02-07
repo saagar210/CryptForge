@@ -33,9 +33,10 @@ pub fn effective_defense(entity: &Entity) -> i32 {
 pub fn effective_speed(entity: &Entity) -> i32 {
     let base = entity.combat.as_ref().map_or(100, |c| c.base_speed);
 
+    let equip_mod = equipment_speed_bonus(entity);
     let status_mod = status_speed_modifier(entity);
 
-    (base + status_mod).clamp(10, 200) // 10 minimum prevents softlock, 200 cap prevents abuse
+    (base + equip_mod + status_mod).clamp(10, 200) // 10 minimum prevents softlock, 200 cap prevents abuse
 }
 
 /// Resolve an attack between attacker and target. Returns (damage, is_crit, killed).
@@ -211,6 +212,39 @@ fn equipment_defense_bonus(entity: &Entity) -> i32 {
     bonus
 }
 
+fn equipment_speed_bonus(entity: &Entity) -> i32 {
+    let equipment = match &entity.equipment {
+        Some(e) => e,
+        None => return 0,
+    };
+    let inventory = match &entity.inventory {
+        Some(inv) => inv,
+        None => return 0,
+    };
+
+    let mut bonus = 0;
+
+    // Check all equipped items for speed_mod
+    let slots = [
+        equipment.main_hand,
+        equipment.off_hand,
+        equipment.head,
+        equipment.body,
+        equipment.ring,
+        equipment.amulet,
+    ];
+
+    for slot_id in slots.iter().flatten() {
+        if let Some(item) = inventory.items.iter().find(|i| i.id == *slot_id) {
+            if let Some(props) = &item.item {
+                bonus += props.speed_mod;
+            }
+        }
+    }
+
+    bonus
+}
+
 fn equipment_ring_bonus(entity: &Entity) -> i32 {
     let equipment = match &entity.equipment {
         Some(e) => e,
@@ -289,6 +323,7 @@ mod tests {
                 base_speed: 100,
                 crit_chance: 0.05,
                 ranged: None,
+                on_hit: None,
             }),
             ai: None,
             inventory: Some(Inventory::new(20)),
@@ -322,6 +357,7 @@ mod tests {
                 base_speed: 100,
                 crit_chance: 0.0,
                 ranged: None,
+                on_hit: None,
             }),
             ai: Some(AIBehavior::Melee),
             inventory: None,
@@ -408,6 +444,50 @@ mod tests {
     }
 
     #[test]
+    fn speed_with_equipment_speed_mod() {
+        let mut player = make_player();
+        // Add a dagger with speed_mod: 20
+        let dagger = Entity {
+            id: 50,
+            name: "Dagger".to_string(),
+            position: Position::new(0, 0),
+            glyph: 0x2F,
+            render_order: RenderOrder::Item,
+            blocks_movement: false,
+            blocks_fov: false,
+            health: None,
+            combat: None,
+            ai: None,
+            inventory: None,
+            equipment: None,
+            item: Some(ItemProperties {
+                item_type: ItemType::Weapon,
+                slot: Some(EquipSlot::MainHand),
+                power: 2,
+                speed_mod: 20,
+                effect: None,
+                charges: None,
+                energy_cost: 100,
+                ammo_type: None,
+                ranged: None,
+            }),
+            status_effects: Vec::new(),
+            fov: None,
+            door: None,
+            trap: None,
+            stair: None,
+            loot_table: None,
+            flavor_text: None,
+            shop: None,
+            interactive: None,
+        };
+        player.inventory.as_mut().unwrap().items.push(dagger);
+        player.equipment.as_mut().unwrap().main_hand = Some(50);
+
+        assert_eq!(effective_speed(&player), 120); // 100 base + 20 speed_mod
+    }
+
+    #[test]
     fn ranged_attack_damage_with_bonus() {
         let attacker = make_player(); // 5 atk
         let target = make_enemy(50, 0, 2); // 2 def
@@ -455,6 +535,7 @@ mod tests {
                 item_type: ItemType::Weapon,
                 slot: Some(EquipSlot::MainHand),
                 power: 2,
+                speed_mod: 0,
                 effect: None,
                 charges: None,
                 energy_cost: 100,

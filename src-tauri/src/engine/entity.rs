@@ -127,6 +127,17 @@ pub struct CombatStats {
     pub base_speed: i32,
     pub crit_chance: f32,
     pub ranged: Option<RangedStats>,
+    pub on_hit: Option<OnHitEffect>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OnHitEffect {
+    Poison { damage: i32, duration: u32 },
+    Burn { damage: i32, duration: u32 },
+    Slow { magnitude: i32, duration: u32 },
+    Confuse { duration: u32 },
+    LifeSteal,
+    DrainMaxHp,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -232,6 +243,7 @@ pub struct ItemProperties {
     pub item_type: ItemType,
     pub slot: Option<EquipSlot>,
     pub power: i32,
+    pub speed_mod: i32,
     pub effect: Option<ItemEffect>,
     pub charges: Option<u32>,
     pub energy_cost: i32,

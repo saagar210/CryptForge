@@ -396,6 +396,12 @@ impl World {
         if result.killed {
             events.extend(self.handle_entity_death(target_id));
         } else {
+            // Apply on-hit effects from attacker's combat stats
+            let on_hit = attacker.combat.as_ref().and_then(|c| c.on_hit.clone());
+            if let Some(effect) = on_hit {
+                self.apply_on_hit_effect(&effect, attacker_id, target_id, result.damage, &attacker_name, &target_name);
+            }
+
             // Activate passive enemies when they take damage
             if let Some(target_entity) = self.get_entity_mut(target_id) {
                 ai::activate_passive(target_entity);
@@ -410,6 +416,102 @@ impl World {
         }
 
         events
+    }
+
+    fn apply_on_hit_effect(
+        &mut self,
+        effect: &OnHitEffect,
+        attacker_id: EntityId,
+        target_id: EntityId,
+        damage: i32,
+        attacker_name: &str,
+        target_name: &str,
+    ) {
+        match effect {
+            OnHitEffect::Poison { damage: dmg, duration } => {
+                if let Some(target) = self.get_entity_mut(target_id) {
+                    target.status_effects.push(StatusEffect {
+                        effect_type: StatusType::Poison,
+                        duration: *duration,
+                        magnitude: *dmg,
+                        source: attacker_name.to_string(),
+                    });
+                }
+                self.push_message(
+                    &format!("{} poisons {}!", attacker_name, target_name),
+                    LogSeverity::Danger,
+                );
+            }
+            OnHitEffect::Burn { damage: dmg, duration } => {
+                if let Some(target) = self.get_entity_mut(target_id) {
+                    target.status_effects.push(StatusEffect {
+                        effect_type: StatusType::Burning,
+                        duration: *duration,
+                        magnitude: *dmg,
+                        source: attacker_name.to_string(),
+                    });
+                }
+                self.push_message(
+                    &format!("{} sets {} ablaze!", attacker_name, target_name),
+                    LogSeverity::Danger,
+                );
+            }
+            OnHitEffect::Slow { magnitude: _, duration } => {
+                if let Some(target) = self.get_entity_mut(target_id) {
+                    target.status_effects.push(StatusEffect {
+                        effect_type: StatusType::Slowed,
+                        duration: *duration,
+                        magnitude: 0,
+                        source: attacker_name.to_string(),
+                    });
+                }
+                self.push_message(
+                    &format!("{} slows {}!", attacker_name, target_name),
+                    LogSeverity::Info,
+                );
+            }
+            OnHitEffect::Confuse { duration } => {
+                if let Some(target) = self.get_entity_mut(target_id) {
+                    target.status_effects.push(StatusEffect {
+                        effect_type: StatusType::Confused,
+                        duration: *duration,
+                        magnitude: 0,
+                        source: attacker_name.to_string(),
+                    });
+                }
+                self.push_message(
+                    &format!("{} confuses {}!", attacker_name, target_name),
+                    LogSeverity::Danger,
+                );
+            }
+            OnHitEffect::LifeSteal => {
+                let heal = damage / 2;
+                if heal > 0 {
+                    if let Some(attacker_entity) = self.get_entity_mut(attacker_id) {
+                        if let Some(ref mut health) = attacker_entity.health {
+                            health.current = (health.current + heal).min(health.max);
+                        }
+                    }
+                    self.push_message(
+                        &format!("{} drains life from {}!", attacker_name, target_name),
+                        LogSeverity::Danger,
+                    );
+                }
+            }
+            OnHitEffect::DrainMaxHp => {
+                if let Some(target) = self.get_entity_mut(target_id) {
+                    if let Some(ref mut health) = target.health {
+                        let drain = 2;
+                        health.max = (health.max - drain).max(1);
+                        health.current = health.current.min(health.max);
+                    }
+                }
+                self.push_message(
+                    &format!("{} drains {}'s vitality!", attacker_name, target_name),
+                    LogSeverity::Danger,
+                );
+            }
+        }
     }
 
     fn handle_entity_death(&mut self, entity_id: EntityId) -> Vec<GameEvent> {
@@ -1879,6 +1981,7 @@ impl World {
                 item_type: template.item_type,
                 slot: template.slot,
                 power: template.power,
+                speed_mod: template.speed_mod,
                 effect: template.effect.clone(),
                 charges: template.charges,
                 energy_cost: template.energy_cost,
@@ -2068,6 +2171,7 @@ impl World {
                                 item_type: template.item_type,
                                 slot: template.slot,
                                 power: template.power,
+                                speed_mod: template.speed_mod,
                                 effect: template.effect.clone(),
                                 charges: template.charges,
                                 energy_cost: template.energy_cost,
@@ -2278,6 +2382,7 @@ impl World {
                                 item_type: template.item_type,
                                 slot: template.slot,
                                 power: template.power,
+                                speed_mod: template.speed_mod,
                                 effect: template.effect.clone(),
                                 charges: template.charges,
                                 energy_cost: template.energy_cost,
@@ -3016,6 +3121,7 @@ mod tests {
                 base_speed: 100,
                 crit_chance: 0.0,
                 ranged: None,
+                on_hit: None,
             }),
             ai: Some(AIBehavior::Melee),
             inventory: None,
@@ -3070,6 +3176,7 @@ mod tests {
                 base_speed: 100,
                 crit_chance: 0.0,
                 ranged: None,
+                on_hit: None,
             }),
             ai: Some(AIBehavior::Melee),
             inventory: None,
@@ -3316,6 +3423,7 @@ mod tests {
                         item_type: ItemType::Weapon,
                         slot: Some(EquipSlot::MainHand),
                         power: 2,
+                        speed_mod: 0,
                         effect: None,
                         charges: None,
                         energy_cost: 0,
