@@ -185,6 +185,7 @@ fn status_attack_modifier(entity: &Entity) -> i32 {
     for effect in &entity.status_effects {
         match effect.effect_type {
             StatusType::Weakened => modifier -= 3,
+            StatusType::Strengthened => modifier += 3,
             _ => {}
         }
     }

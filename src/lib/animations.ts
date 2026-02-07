@@ -1,4 +1,4 @@
-import type { GameEvent, Position } from "../types/game";
+import type { GameEvent, Position, EntityView } from "../types/game";
 
 export interface Animation {
   type: "damage_number" | "attack_flash" | "death_fade" | "heal_number" | "level_up_flash" | "stairs_fade";
@@ -16,30 +16,44 @@ export function getActiveAnimations(): readonly Animation[] {
   return ACTIVE;
 }
 
-export function queueAnimationsFromEvents(events: GameEvent[]): void {
+export function queueAnimationsFromEvents(events: GameEvent[], entities?: EntityView[]): void {
   const now = performance.now();
+
+  const findPos = (entityId: number): Position | undefined => {
+    return entities?.find((e) => e.id === entityId)?.position;
+  };
 
   for (const event of events) {
     if (event === "Victory") continue;
 
-    if ("Attacked" in event) {
-      // Damage number floats up from target position
-      // We don't have target position in the event, so we skip positioning for now
-      // The entity rendering handles flash on damage taken
-    } else if ("DamageTaken" in event) {
+    if ("DamageTaken" in event) {
+      const pos = findPos(event.DamageTaken.entity_id) ?? { x: 0, y: 0 };
       ACTIVE.push({
         type: "damage_number",
-        position: { x: 0, y: 0 }, // Will be positioned per-entity in renderer
+        position: pos,
         startTime: now,
         duration: 600,
         value: event.DamageTaken.amount,
         color: "#FF4444",
         progress: 0,
       });
+    } else if ("Attacked" in event) {
+      if (event.Attacked.killed) {
+        const pos = findPos(event.Attacked.target_id) ?? { x: 0, y: 0 };
+        ACTIVE.push({
+          type: "death_fade",
+          position: pos,
+          startTime: now,
+          duration: 300,
+          color: "#FF0000",
+          progress: 0,
+        });
+      }
     } else if ("Healed" in event) {
+      const pos = findPos(event.Healed.entity_id) ?? { x: 0, y: 0 };
       ACTIVE.push({
         type: "heal_number",
-        position: { x: 0, y: 0 },
+        position: pos,
         startTime: now,
         duration: 600,
         value: event.Healed.amount,
@@ -86,14 +100,14 @@ export function renderAnimations(
   cameraX: number,
   cameraY: number,
   tileSize: number,
-  playerPos: Position,
+  _playerPos: Position,
 ): void {
   for (const anim of ACTIVE) {
     switch (anim.type) {
       case "damage_number": {
         if (anim.value === undefined) break;
-        const screenX = (playerPos.x - cameraX) * tileSize + tileSize / 2;
-        const screenY = (playerPos.y - cameraY) * tileSize - anim.progress * 20;
+        const screenX = (anim.position.x - cameraX) * tileSize + tileSize / 2;
+        const screenY = (anim.position.y - cameraY) * tileSize - anim.progress * 20;
         ctx.globalAlpha = 1 - anim.progress;
         ctx.font = "bold 14px monospace";
         ctx.fillStyle = anim.color ?? "#FF4444";
@@ -105,14 +119,23 @@ export function renderAnimations(
       }
       case "heal_number": {
         if (anim.value === undefined) break;
-        const hx = (playerPos.x - cameraX) * tileSize + tileSize / 2;
-        const hy = (playerPos.y - cameraY) * tileSize - anim.progress * 20;
+        const hx = (anim.position.x - cameraX) * tileSize + tileSize / 2;
+        const hy = (anim.position.y - cameraY) * tileSize - anim.progress * 20;
         ctx.globalAlpha = 1 - anim.progress;
         ctx.font = "bold 14px monospace";
         ctx.fillStyle = anim.color ?? "#44FF44";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(`+${anim.value}`, hx, hy);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case "death_fade": {
+        const dx = (anim.position.x - cameraX) * tileSize;
+        const dy = (anim.position.y - cameraY) * tileSize;
+        ctx.globalAlpha = 0.5 * (1 - anim.progress);
+        ctx.fillStyle = "#FF0000";
+        ctx.fillRect(dx, dy, tileSize, tileSize);
         ctx.globalAlpha = 1;
         break;
       }

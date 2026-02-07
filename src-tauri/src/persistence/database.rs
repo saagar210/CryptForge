@@ -25,7 +25,7 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
     // Create schema_version table if it doesn't exist
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_version (
-            version INTEGER NOT NULL
+            version INTEGER PRIMARY KEY NOT NULL
         );"
     ).map_err(|e| format!("Migration error: {}", e))?;
 

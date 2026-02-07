@@ -1,23 +1,16 @@
 use rand::Rng;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::engine::entity::*;
 use crate::engine::enemies::{all_enemies, boss_templates, apply_endless_scaling, get_boss_for_floor, get_enemy_pool};
 use crate::engine::items::all_items;
 use crate::engine::map::{Map, Room, RoomType, TileType};
 
-static mut NEXT_ENTITY_ID: EntityId = 1;
+static NEXT_ENTITY_ID: AtomicU32 = AtomicU32::new(1);
 
 pub fn next_id() -> EntityId {
-    unsafe {
-        let id = NEXT_ENTITY_ID;
-        NEXT_ENTITY_ID += 1;
-        id
-    }
-}
-
-pub fn reset_id_counter() {
-    unsafe { NEXT_ENTITY_ID = 1; }
+    NEXT_ENTITY_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 pub fn spawn_player(pos: Position) -> Entity {

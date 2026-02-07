@@ -212,7 +212,7 @@ pub fn all_items() -> Vec<ItemTemplate> {
         ItemTemplate {
             name: "Potion of Strength", glyph: 0x21, item_type: ItemType::Potion,
             slot: None, power: 0, speed_mod: 0,
-            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Weakened, duration: 20 }),
+            effect: Some(ItemEffect::ApplyStatus { effect: StatusType::Strengthened, duration: 20 }),
             charges: None, energy_cost: 100,
             min_floor: 3, rarity: Rarity::Uncommon,
         },

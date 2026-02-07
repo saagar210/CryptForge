@@ -41,7 +41,7 @@ pub fn end_run(conn: &Connection, world: &World) -> Result<(), String> {
     let cause = if world.victory {
         None
     } else {
-        Some("Slain in the dungeon")
+        world.last_damage_source.as_deref().or(Some("Slain in the dungeon"))
     };
 
     let score = {

@@ -19,6 +19,7 @@ export type StatusType =
   | "Stunned"
   | "Confused"
   | "Weakened"
+  | "Strengthened"
   | "Blinded"
   | "Regenerating"
   | "Hasted"
@@ -63,6 +64,7 @@ export interface GameState {
   turn: number;
   messages: LogMessage[];
   minimap: MinimapData;
+  pending_level_up: boolean;
 }
 
 export interface PlayerState {

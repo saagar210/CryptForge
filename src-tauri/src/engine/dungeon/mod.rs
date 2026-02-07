@@ -37,7 +37,15 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
                 cellular::generate_cellular(&mut rng)
             }
         }
-        6..=9 => cellular::generate_cellular(&mut rng),
+        6 => {
+            // 20% BSP, 80% cellular (end of mixed range)
+            if rng.gen::<f64>() < 0.2 {
+                bsp::generate_bsp(&mut rng)
+            } else {
+                cellular::generate_cellular(&mut rng)
+            }
+        }
+        7..=9 => cellular::generate_cellular(&mut rng),
         10 => generate_arena(&mut rng),
         _ => {
             // Endless mode: cycle between types
@@ -55,7 +63,9 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
 
     // Place stairs in the furthest room from start
     if let Some(stairs_idx) = get_stairs_room_idx(&map.rooms) {
-        let pos = map.rooms[stairs_idx].center();
+        let center = map.rooms[stairs_idx].center();
+        // Find nearest floor tile (center may be wall in cellular automata rooms)
+        let pos = find_nearest_floor(&map, center);
         map.set_tile(pos.x, pos.y, TileType::DownStairs);
     }
 
@@ -73,6 +83,29 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
     }
 
     map
+}
+
+/// Find the nearest floor tile to a position (BFS spiral outward).
+fn find_nearest_floor(map: &Map, start: crate::engine::entity::Position) -> crate::engine::entity::Position {
+    use crate::engine::entity::Position;
+    if map.in_bounds(start.x, start.y) && map.get_tile(start.x, start.y) == TileType::Floor {
+        return start;
+    }
+    for radius in 1i32..20 {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx.abs() != radius && dy.abs() != radius {
+                    continue; // Only check the ring at this radius
+                }
+                let x = start.x + dx;
+                let y = start.y + dy;
+                if map.in_bounds(x, y) && map.get_tile(x, y) == TileType::Floor {
+                    return Position::new(x, y);
+                }
+            }
+        }
+    }
+    start // fallback: shouldn't happen on a valid map
 }
 
 fn generate_arena(_rng: &mut impl rand::Rng) -> Map {
@@ -109,15 +142,20 @@ fn generate_arena(_rng: &mut impl rand::Rng) -> Map {
         }
     }
 
-    // Corridors connecting corners to arena
-    // Horizontal corridors
-    for x in 15..arena_x {
-        map.set_tile(x, 9, TileType::Floor);
-        map.set_tile(x, 41, TileType::Floor);
+    // Corridors connecting corner rooms to arena
+    // Top corridors at y=10 (inside both top room interiors and arena top edge)
+    for x in 14..=20 {
+        map.set_tile(x, 10, TileType::Floor);  // top-left room → arena
     }
-    for x in (arena_x + arena_w)..65 {
-        map.set_tile(x, 9, TileType::Floor);
-        map.set_tile(x, 41, TileType::Floor);
+    for x in 59..=66 {
+        map.set_tile(x, 10, TileType::Floor);  // arena → top-right room
+    }
+    // Bottom corridors at y=39 (inside both bottom room interiors and arena bottom)
+    for x in 14..=20 {
+        map.set_tile(x, 39, TileType::Floor);  // bottom-left room → arena
+    }
+    for x in 59..=66 {
+        map.set_tile(x, 39, TileType::Floor);  // arena → bottom-right room
     }
 
     // Build rooms list

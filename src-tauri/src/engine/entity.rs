@@ -330,6 +330,7 @@ pub enum StatusType {
     Stunned,
     Confused,
     Weakened,
+    Strengthened,
     Blinded,
     Regenerating,
     Hasted,
@@ -418,6 +419,7 @@ pub struct GameState {
     pub turn: u32,
     pub messages: Vec<LogMessage>,
     pub minimap: MinimapData,
+    pub pending_level_up: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -14,6 +14,9 @@ interface GameViewProps {
   gameOver: GameOverInfo | null;
   events: GameEvent[];
   pendingLevelUp: boolean;
+  masterVolume: number;
+  sfxVolume: number;
+  ambientVolume: number;
   onMove: (dir: Direction) => void;
   onWait: () => void;
   onPickUp: () => void;
@@ -30,6 +33,9 @@ export function GameView({
   gameOver: _gameOver,
   events,
   pendingLevelUp,
+  masterVolume,
+  sfxVolume,
+  ambientVolume,
   onMove,
   onWait,
   onPickUp,
@@ -73,7 +79,7 @@ export function GameView({
   );
 
   useInput(mode, inputActions, true);
-  useAudio(events, 80, 80, 50);
+  useAudio(events, masterVolume, sfxVolume, ambientVolume);
 
   const handleCloseInventory = useCallback(() => setShowInventory(false), []);
 

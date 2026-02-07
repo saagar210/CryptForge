@@ -29,12 +29,12 @@ impl TileType {
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            TileType::Wall => "wall",
-            TileType::Floor => "floor",
-            TileType::DownStairs => "down_stairs",
-            TileType::UpStairs => "up_stairs",
-            TileType::DoorClosed => "door_closed",
-            TileType::DoorOpen => "door_open",
+            TileType::Wall => "Wall",
+            TileType::Floor => "Floor",
+            TileType::DownStairs => "DownStairs",
+            TileType::UpStairs => "UpStairs",
+            TileType::DoorClosed => "DoorClosed",
+            TileType::DoorOpen => "DoorOpen",
         }
     }
 }

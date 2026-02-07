@@ -54,8 +54,8 @@ pub fn player_action(action: PlayerAction, state: State<'_, AppState>) -> Result
         }
     }
 
-    // Handle game over (death or victory)
-    if world.game_over || world.victory {
+    // Handle game over (death or victory — victory sets game_over = true)
+    if world.game_over {
         if let Ok(db) = state.db.lock() {
             let _ = save::end_run(&db, world);
         }
@@ -91,9 +91,14 @@ pub fn save_game(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn load_game(state: State<'_, AppState>) -> Result<Option<TurnResult>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    // Load from db first, then release the lock before acquiring world lock
+    // (consistent ordering: world before db everywhere else)
+    let loaded = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        save::load_world(&db)?
+    };
 
-    match save::load_world(&db)? {
+    match loaded {
         Some(world) => {
             let result = world.build_turn_result(Vec::new());
             *state.world.lock().map_err(|e| e.to_string())? = Some(world);
@@ -203,9 +208,16 @@ pub fn check_ollama(state: State<'_, AppState>) -> Result<OllamaStatus, String> 
         });
     }
 
-    // Synchronous check — just try to connect
+    // Synchronous check with timeout
     let url = format!("{}/api/tags", settings.ollama_url);
-    let available = reqwest::blocking::get(&url).is_ok();
+    let timeout = std::time::Duration::from_secs(settings.ollama_timeout as u64);
+    let available = reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .ok()
+        .and_then(|c| c.get(&url).send().ok())
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
 
     Ok(OllamaStatus {
         available,

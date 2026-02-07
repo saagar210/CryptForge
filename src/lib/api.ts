@@ -36,7 +36,7 @@ export async function loadGame(): Promise<TurnResult | null> {
 }
 
 export async function inspectEntity(entityId: number): Promise<EntityDetail | null> {
-  return invoke<EntityDetail | null>("inspect_entity", { entityId });
+  return invoke<EntityDetail | null>("inspect_entity", { entity_id: entityId });
 }
 
 // --- History & Scores ---

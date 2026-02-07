@@ -79,7 +79,7 @@ export function useAudio(
       } else if ("PlayerDied" in event) {
         playSfx("player_death");
       } else if ("BossDefeated" in event) {
-        playSfx("boss_encounter");
+        playSfx("victory");
       }
     }
   }, [events]);

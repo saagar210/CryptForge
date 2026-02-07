@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react";
-import type { AppScreen, LevelUpChoice } from "./types/game";
+import { useState, useCallback, useEffect } from "react";
+import type { AppScreen, LevelUpChoice, Settings as SettingsType } from "./types/game";
 import { useGameState } from "./hooks/useGameState";
+import { getSettings } from "./lib/api";
 import { GameView } from "./components/game/GameView";
 import { DeathScreen } from "./components/game/DeathScreen";
 import { MainMenu } from "./components/menu/MainMenu";
@@ -11,6 +12,20 @@ import { Settings } from "./components/menu/Settings";
 function App() {
   const [screen, setScreen] = useState<AppScreen>("menu");
   const game = useGameState();
+  const [audioSettings, setAudioSettings] = useState({ master: 80, sfx: 80, ambient: 50 });
+
+  // Load audio settings from backend
+  useEffect(() => {
+    getSettings()
+      .then((s: SettingsType) => {
+        setAudioSettings({
+          master: s.master_volume,
+          sfx: s.sfx_volume,
+          ambient: s.ambient_volume,
+        });
+      })
+      .catch(() => {});
+  }, []);
 
   const handleNewGame = useCallback(
     async (seed?: string) => {
@@ -39,13 +54,21 @@ function App() {
     setScreen("menu");
   }, [game]);
 
-  const handleBackToMenu = useCallback(() => setScreen("menu"), []);
+  const handleBackToMenu = useCallback(() => {
+    // Reload settings in case user changed them
+    getSettings()
+      .then((s: SettingsType) => {
+        setAudioSettings({
+          master: s.master_volume,
+          sfx: s.sfx_volume,
+          ambient: s.ambient_volume,
+        });
+      })
+      .catch(() => {});
+    setScreen("menu");
+  }, []);
 
-  // Detect pending level up from game state
-  const pendingLevelUp = game.gameState?.player.xp === 0 && (game.events.some((e) => {
-    if (typeof e === "object" && "LevelUp" in e) return true;
-    return false;
-  }));
+  const pendingLevelUp = game.gameState?.pending_level_up ?? false;
 
   // Check game over
   if (game.gameOver && screen === "game") {
@@ -77,6 +100,9 @@ function App() {
           gameOver={game.gameOver}
           events={game.events}
           pendingLevelUp={pendingLevelUp ?? false}
+          masterVolume={audioSettings.master}
+          sfxVolume={audioSettings.sfx}
+          ambientVolume={audioSettings.ambient}
           onMove={game.move}
           onWait={game.wait}
           onPickUp={game.pickUp}

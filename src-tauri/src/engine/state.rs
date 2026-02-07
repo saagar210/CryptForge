@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
+use super::ai;
 use super::combat;
 use super::dungeon;
 use super::dungeon::placement;
@@ -32,6 +33,8 @@ pub struct World {
     pub bosses_killed: u32,
     pub game_over: bool,
     pub victory: bool,
+    pub last_damage_source: Option<String>,
+    pub spotted_enemies: HashSet<EntityId>,
     #[serde(with = "rng_serde")]
     pub rng: StdRng,
 }
@@ -75,7 +78,6 @@ impl World {
             .unwrap_or(Position::new(1, 1));
 
         let player = placement::spawn_player(start_pos);
-        placement::reset_id_counter();
         let mut entities = vec![player];
 
         // Spawn floor entities
@@ -110,6 +112,8 @@ impl World {
             bosses_killed: 0,
             game_over: false,
             victory: false,
+            last_damage_source: None,
+            spotted_enemies: HashSet::new(),
             rng,
         };
 
@@ -126,7 +130,16 @@ impl World {
     pub fn resolve_turn(&mut self, action: PlayerAction) -> TurnResult {
         let mut events = Vec::new();
 
-        if self.game_over || self.pending_level_up {
+        if self.game_over {
+            return self.build_turn_result(events);
+        }
+
+        // Level-up choice is a free action — apply and return without advancing turn
+        if self.pending_level_up {
+            if let PlayerActionType::LevelUpChoice(choice) = &action.action_type {
+                let lu_events = self.apply_level_up(*choice);
+                events.extend(lu_events);
+            }
             return self.build_turn_result(events);
         }
 
@@ -258,6 +271,11 @@ impl World {
         let target_name = target.name.clone();
         let attacker_name = attacker.name.clone();
 
+        // Track what damages the player for death screen
+        if target_id == self.player_id {
+            self.last_damage_source = Some(format!("Slain by {}", attacker_name));
+        }
+
         if result.is_crit {
             self.push_message(
                 &format!("{} critically hits {} for {} damage!", attacker_name, target_name, result.damage),
@@ -279,6 +297,18 @@ impl World {
 
         if result.killed {
             events.extend(self.handle_entity_death(target_id));
+        } else {
+            // Activate passive enemies when they take damage
+            if let Some(target_entity) = self.get_entity_mut(target_id) {
+                ai::activate_passive(target_entity);
+                if ai::check_boss_phase(target_entity) {
+                    let boss_name = target_entity.name.clone();
+                    self.push_message(
+                        &format!("{} enters a frenzied state!", boss_name),
+                        LogSeverity::Danger,
+                    );
+                }
+            }
         }
 
         events
@@ -311,6 +341,7 @@ impl World {
                 // Check victory condition (floor 10 boss)
                 if self.floor == 10 {
                     self.victory = true;
+                    self.game_over = true;
                     events.push(GameEvent::Victory);
                     self.push_message("Victory! You have conquered the dungeon!", LogSeverity::Good);
                 }
@@ -411,69 +442,28 @@ impl World {
             None => return events,
         };
 
-        let player_pos = match self.get_entity(self.player_id) {
-            Some(p) => p.position,
+        let player = match self.get_entity(self.player_id) {
+            Some(p) => p.clone(),
             None => return events,
         };
 
-        // Check if enemy can see the player
-        let can_see_player = entity
-            .fov
-            .as_ref()
-            .map(|f| f.visible_tiles.contains(&player_pos))
-            .unwrap_or(false);
+        // Use AI module for decision making (handles confusion, fleeing, LOS, etc.)
+        let action = ai::decide_action(&entity, &player, &self.dijkstra, &self.map, &self.entities);
 
-        if !can_see_player {
-            return events;
-        }
-
-        let distance = entity.position.chebyshev_distance(&player_pos);
-
-        match &entity.ai {
-            Some(AIBehavior::Melee) => {
-                if distance <= 1 {
-                    // Adjacent: attack
-                    events.extend(self.perform_attack(entity_id, self.player_id));
-                } else {
-                    // Move toward player using Dijkstra
-                    events.extend(self.move_toward_player(entity_id));
-                }
+        match action {
+            ai::AIAction::MeleeAttack(_) | ai::AIAction::RangedAttack(_) => {
+                events.extend(self.perform_attack(entity_id, self.player_id));
             }
-            Some(AIBehavior::Ranged { range, preferred_distance }) => {
-                let range = *range;
-                let preferred = *preferred_distance;
-
-                if distance <= 1 {
-                    // Too close, attack
-                    events.extend(self.perform_attack(entity_id, self.player_id));
-                } else if distance <= range {
-                    if distance < preferred {
-                        // Too close for comfort, try to retreat
-                        events.extend(self.move_away_from_player(entity_id));
-                    } else {
-                        // In range, attack (ranged attack = melee for now, AI task will refine)
-                        events.extend(self.perform_attack(entity_id, self.player_id));
-                    }
-                } else {
-                    // Out of range, move closer
-                    events.extend(self.move_toward_player(entity_id));
-                }
+            ai::AIAction::MoveToward(_) => {
+                events.extend(self.move_toward_player(entity_id));
             }
-            Some(AIBehavior::Passive) => {
-                // Do nothing unless attacked (handled elsewhere when switching to Melee)
-            }
-            Some(AIBehavior::Fleeing) => {
+            ai::AIAction::MoveAway(_) => {
                 events.extend(self.move_away_from_player(entity_id));
             }
-            Some(AIBehavior::Boss(_phase)) => {
-                // Basic boss behavior (enhanced in AI task)
-                if distance <= 1 {
-                    events.extend(self.perform_attack(entity_id, self.player_id));
-                } else {
-                    events.extend(self.move_toward_player(entity_id));
-                }
+            ai::AIAction::MoveRandom => {
+                events.extend(self.move_random(entity_id));
             }
-            None => {}
+            ai::AIAction::Wait => {}
         }
 
         events
@@ -529,6 +519,37 @@ impl World {
         events
     }
 
+    fn move_random(&mut self, entity_id: EntityId) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        let entity_pos = match self.get_entity(entity_id) {
+            Some(e) => e.position,
+            None => return events,
+        };
+
+        let directions = [
+            Direction::N, Direction::S, Direction::E, Direction::W,
+            Direction::NE, Direction::NW, Direction::SE, Direction::SW,
+        ];
+        let dir = directions[self.rng.gen_range(0..directions.len())];
+        let new_pos = entity_pos.apply_direction(dir);
+
+        if self.map.in_bounds(new_pos.x, new_pos.y)
+            && self.map.is_walkable(new_pos.x, new_pos.y)
+            && !self.is_blocked(new_pos, entity_id)
+        {
+            let from = entity_pos;
+            self.move_entity(entity_id, new_pos);
+            events.push(GameEvent::Moved {
+                entity_id,
+                from,
+                to: new_pos,
+            });
+        }
+
+        events
+    }
+
     fn tick_status_effects(&mut self) -> Vec<GameEvent> {
         let mut events = Vec::new();
         let entity_ids: Vec<EntityId> = self.entities.iter().map(|e| e.id).collect();
@@ -543,6 +564,9 @@ impl World {
                 match effect.effect_type {
                     StatusType::Poison => {
                         let damage = effect.magnitude.max(2);
+                        if id == self.player_id {
+                            self.last_damage_source = Some("Succumbed to poison".to_string());
+                        }
                         if let Some(entity) = self.get_entity_mut(id) {
                             if let Some(ref mut health) = entity.health {
                                 health.current -= damage;
@@ -561,6 +585,9 @@ impl World {
                     }
                     StatusType::Burning => {
                         let damage = effect.magnitude.max(3);
+                        if id == self.player_id {
+                            self.last_damage_source = Some("Burned to death".to_string());
+                        }
                         if let Some(entity) = self.get_entity_mut(id) {
                             if let Some(ref mut health) = entity.health {
                                 health.current -= damage;
@@ -618,25 +645,26 @@ impl World {
         events
     }
 
-    fn check_spotted_enemies(&self) -> Vec<GameEvent> {
+    fn check_spotted_enemies(&mut self) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
-        let player_fov = self
+        let visible = self
             .get_entity(self.player_id)
             .and_then(|e| e.fov.as_ref())
-            .map(|f| &f.visible_tiles);
+            .map(|f| f.visible_tiles.clone())
+            .unwrap_or_default();
 
-        if let Some(visible) = player_fov {
-            for entity in &self.entities {
-                if entity.ai.is_some() && visible.contains(&entity.position) {
-                    // Only emit on first sight (could track, but for now always emit)
-                    // The AI task can refine this
-                    events.push(GameEvent::EnemySpotted {
-                        entity_id: entity.id,
-                        name: entity.name.clone(),
-                    });
-                }
-            }
+        let newly_spotted: Vec<(EntityId, String)> = self.entities.iter()
+            .filter(|e| e.ai.is_some() && visible.contains(&e.position) && !self.spotted_enemies.contains(&e.id))
+            .map(|e| (e.id, e.name.clone()))
+            .collect();
+
+        for (id, name) in newly_spotted {
+            self.spotted_enemies.insert(id);
+            events.push(GameEvent::EnemySpotted {
+                entity_id: id,
+                name,
+            });
         }
 
         events
@@ -670,6 +698,9 @@ impl World {
         match &trap_props.trap_type {
             TrapType::Spike { damage } => {
                 let damage = *damage;
+                if entity_id == self.player_id {
+                    self.last_damage_source = Some("Killed by a spike trap".to_string());
+                }
                 if let Some(entity) = self.get_entity_mut(entity_id) {
                     if let Some(ref mut health) = entity.health {
                         health.current -= damage;
@@ -688,6 +719,9 @@ impl World {
             TrapType::Poison { damage, duration } => {
                 let damage = *damage;
                 let duration = *duration;
+                if entity_id == self.player_id {
+                    self.last_damage_source = Some("Killed by a poison trap".to_string());
+                }
                 if let Some(entity) = self.get_entity_mut(entity_id) {
                     entity.status_effects.push(StatusEffect {
                         effect_type: StatusType::Poison,
@@ -863,7 +897,6 @@ impl World {
 
         // Generate new floor
         self.map = dungeon::generate_floor(self.seed, self.floor);
-        placement::reset_id_counter();
 
         // Find start room and move player there
         let start_pos = self
@@ -878,6 +911,7 @@ impl World {
         let player = self.get_entity(self.player_id).unwrap().clone();
         self.entities.clear();
         self.energy.clear();
+        self.spotted_enemies.clear();
 
         let mut player = player;
         player.position = start_pos;
@@ -1241,7 +1275,29 @@ impl World {
 
         let item_view = entity_to_item_view(&item);
 
-        // Unequip current item in slot (if any)
+        // Check if there's already an item in this slot — unequip it first
+        let prev_item_id = self
+            .get_entity(self.player_id)
+            .and_then(|p| p.equipment.as_ref())
+            .and_then(|e| e.get_slot(slot));
+
+        if let Some(prev_id) = prev_item_id {
+            // Clear the old slot before equipping new item
+            if let Some(player) = self.get_entity_mut(self.player_id) {
+                if let Some(ref mut equip) = player.equipment {
+                    equip.set_slot(slot, None);
+                }
+            }
+            let prev_name = self
+                .get_entity(self.player_id)
+                .and_then(|p| p.inventory.as_ref())
+                .and_then(|inv| inv.items.iter().find(|i| i.id == prev_id))
+                .map(|i| i.name.clone())
+                .unwrap_or_else(|| "item".to_string());
+            self.push_message(&format!("You unequip the {}.", prev_name), LogSeverity::Info);
+        }
+
+        // Equip the new item
         if let Some(player) = self.get_entity_mut(self.player_id) {
             if let Some(ref mut equip) = player.equipment {
                 equip.set_slot(slot, Some(item.id));
@@ -1292,6 +1348,13 @@ impl World {
 
         self.pending_level_up = false;
 
+        let desc = match choice {
+            LevelUpChoice::MaxHp => "+10 Max HP!",
+            LevelUpChoice::Attack => "+2 Attack!",
+            LevelUpChoice::Defense => "+2 Defense!",
+            LevelUpChoice::Speed => "+15 Speed!",
+        };
+
         if let Some(player) = self.get_entity_mut(self.player_id) {
             match choice {
                 LevelUpChoice::MaxHp => {
@@ -1299,28 +1362,26 @@ impl World {
                         health.max += 10;
                         health.current += 10;
                     }
-                    self.push_message("+10 Max HP!", LogSeverity::Good);
                 }
                 LevelUpChoice::Attack => {
                     if let Some(ref mut combat) = player.combat {
                         combat.base_attack += 2;
                     }
-                    self.push_message("+2 Attack!", LogSeverity::Good);
                 }
                 LevelUpChoice::Defense => {
                     if let Some(ref mut combat) = player.combat {
                         combat.base_defense += 2;
                     }
-                    self.push_message("+2 Defense!", LogSeverity::Good);
                 }
                 LevelUpChoice::Speed => {
                     if let Some(ref mut combat) = player.combat {
                         combat.base_speed += 15;
                     }
-                    self.push_message("+15 Speed!", LogSeverity::Good);
                 }
             }
         }
+
+        self.push_message(desc, LogSeverity::Good);
 
         Vec::new()
     }
@@ -1454,7 +1515,7 @@ impl World {
     fn handle_player_death(&mut self, mut events: Vec<GameEvent>) -> TurnResult {
         self.game_over = true;
 
-        let cause = "Slain in the dungeon".to_string();
+        let cause = self.last_damage_source.clone().unwrap_or_else(|| "Slain in the dungeon".to_string());
         events.push(GameEvent::PlayerDied {
             cause: cause.clone(),
         });
@@ -1536,7 +1597,7 @@ impl World {
         // Recent messages (last 50)
         let messages: Vec<LogMessage> = self.messages.iter().rev().take(50).cloned().collect();
 
-        let game_over = if self.victory && !self.game_over {
+        let game_over = if self.victory && self.game_over {
             Some(GameOverInfo {
                 cause_of_death: "Victory!".to_string(),
                 epitaph: None,
@@ -1567,6 +1628,7 @@ impl World {
                 turn: self.turn,
                 messages,
                 minimap,
+                pending_level_up: self.pending_level_up,
             },
             events,
             game_over,
