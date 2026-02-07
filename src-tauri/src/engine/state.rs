@@ -343,6 +343,15 @@ impl World {
                         let trap_events = self.check_traps(self.player_id, new_pos);
                         events.extend(trap_events);
                     }
+                } else if self.map.in_bounds(new_pos.x, new_pos.y)
+                    && self.map.get_tile(new_pos.x, new_pos.y) == TileType::SecretWall
+                {
+                    // Bump-to-reveal secret wall
+                    self.map.set_tile(new_pos.x, new_pos.y, TileType::Floor);
+                    self.map.refresh_blocked();
+                    self.push_message("You discover a secret passage!", LogSeverity::Good);
+                    events.push(GameEvent::SecretRoomFound { position: new_pos });
+                    self.recompute_fov();
                 } else {
                     self.push_message("You can't move there.", LogSeverity::Info);
                 }
@@ -2029,6 +2038,24 @@ impl World {
                 self.map.reveal_all();
                 effect_desc = "revealed the map".to_string();
                 self.push_message("The map is revealed!", LogSeverity::Good);
+            }
+            Some(ItemEffect::RevealSecrets) => {
+                let mut count = 0;
+                for y in 0..self.map.height as i32 {
+                    for x in 0..self.map.width as i32 {
+                        if self.map.get_tile(x, y) == TileType::SecretWall {
+                            self.map.reveal(x, y);
+                            count += 1;
+                        }
+                    }
+                }
+                if count > 0 {
+                    effect_desc = "revealed hidden passages".to_string();
+                    self.push_message(&format!("You sense {} hidden passage{}!", count, if count > 1 { "s" } else { "" }), LogSeverity::Good);
+                } else {
+                    effect_desc = "found nothing hidden".to_string();
+                    self.push_message("You sense no hidden passages on this floor.", LogSeverity::Info);
+                }
             }
             Some(ItemEffect::Teleport) => {
                 let floor_tiles: Vec<Position> = (0..self.map.width as i32)
@@ -3844,7 +3871,7 @@ impl World {
                     tiles[idx] = 0;
                 } else {
                     tiles[idx] = match self.map.tiles[idx] {
-                        TileType::Wall => 1,
+                        TileType::Wall | TileType::SecretWall => 1,
                         TileType::Floor | TileType::DoorClosed | TileType::DoorOpen => 2,
                         TileType::DownStairs | TileType::UpStairs => 3,
                     };

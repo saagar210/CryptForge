@@ -61,6 +61,11 @@ pub fn generate_floor(seed: u64, floor: u32) -> Map {
     // Assign room types
     assign_room_types(&mut map.rooms, &mut rng, is_boss_floor, floor);
 
+    // 50% chance to carve a secret room adjacent to a Normal room
+    if !is_boss_floor && rng.gen::<f32>() < 0.5 {
+        carve_secret_room(&mut map, &mut rng);
+    }
+
     // Place stairs in the furthest room from start
     if let Some(stairs_idx) = get_stairs_room_idx(&map.rooms) {
         let center = map.rooms[stairs_idx].center();
@@ -108,6 +113,111 @@ fn find_nearest_floor(map: &Map, start: crate::engine::entity::Position) -> crat
         }
     }
     start // fallback: shouldn't happen on a valid map
+}
+
+/// Carve a 3x3 secret room behind a wall adjacent to a Normal room.
+/// The connecting wall tile becomes SecretWall (bumping reveals it).
+fn carve_secret_room(map: &mut Map, rng: &mut impl Rng) {
+    use crate::engine::map::{Room, RoomType, MAP_WIDTH, MAP_HEIGHT};
+
+    // Find Normal rooms to attach secret room to
+    let normal_indices: Vec<usize> = map.rooms.iter().enumerate()
+        .filter(|(_, r)| r.room_type == RoomType::Normal)
+        .map(|(i, _)| i)
+        .collect();
+
+    if normal_indices.is_empty() {
+        return;
+    }
+
+    let room_idx = normal_indices[rng.gen_range(0..normal_indices.len())];
+    let room = &map.rooms[room_idx];
+
+    // Try each wall of the room to find space for a 3x3 secret chamber
+    // Directions: 0=north, 1=south, 2=west, 3=east
+    let mut dirs: Vec<u8> = vec![0, 1, 2, 3];
+    // Shuffle directions
+    for i in (1..dirs.len()).rev() {
+        let j = rng.gen_range(0..=i);
+        dirs.swap(i, j);
+    }
+
+    for dir in dirs {
+        // Pick a connection point on the room's wall and compute secret room position
+        let (secret_x, secret_y, connect_x, connect_y) = match dir {
+            0 => {
+                // North wall: secret room is above
+                let cx = room.x + 1 + rng.gen_range(0..(room.width - 2).max(1));
+                let cy = room.y - 1; // wall tile
+                (cx - 1, room.y - 4, cx, cy) // 3x3 room starts 3 tiles above wall
+            }
+            1 => {
+                // South wall: secret room is below
+                let cx = room.x + 1 + rng.gen_range(0..(room.width - 2).max(1));
+                let cy = room.y + room.height; // wall tile
+                (cx - 1, room.y + room.height + 1, cx, cy)
+            }
+            2 => {
+                // West wall: secret room is left
+                let cy = room.y + 1 + rng.gen_range(0..(room.height - 2).max(1));
+                let cx = room.x - 1; // wall tile
+                (room.x - 4, cy - 1, cx, cy)
+            }
+            _ => {
+                // East wall: secret room is right
+                let cy = room.y + 1 + rng.gen_range(0..(room.height - 2).max(1));
+                let cx = room.x + room.width; // wall tile
+                (room.x + room.width + 1, cy - 1, cx, cy)
+            }
+        };
+
+        // Check bounds: secret room (3x3) must fit within map with 1-tile border
+        if secret_x < 1 || secret_y < 1
+            || secret_x + 3 >= MAP_WIDTH as i32 - 1
+            || secret_y + 3 >= MAP_HEIGHT as i32 - 1
+        {
+            continue;
+        }
+
+        // Check that the secret room area is all walls (don't carve into existing rooms)
+        let mut area_clear = true;
+        for dy in 0..3 {
+            for dx in 0..3 {
+                let tile = map.get_tile(secret_x + dx, secret_y + dy);
+                if tile != TileType::Wall {
+                    area_clear = false;
+                    break;
+                }
+            }
+            if !area_clear { break; }
+        }
+        if !area_clear {
+            continue;
+        }
+
+        // Also check that the connection tile is currently a Wall
+        if map.get_tile(connect_x, connect_y) != TileType::Wall {
+            continue;
+        }
+
+        // Carve the 3x3 secret room interior
+        for dy in 0..3 {
+            for dx in 0..3 {
+                map.set_tile(secret_x + dx, secret_y + dy, TileType::Floor);
+            }
+        }
+
+        // Set the connection tile to SecretWall
+        map.set_tile(connect_x, connect_y, TileType::SecretWall);
+
+        // Add the secret room to the room list (for item placement)
+        let mut secret_room = Room::new(secret_x, secret_y, 3, 3);
+        secret_room.room_type = RoomType::Treasure; // Rare loot
+        map.rooms.push(secret_room);
+
+        map.refresh_blocked();
+        return; // Only one secret room per floor
+    }
 }
 
 fn generate_arena(_rng: &mut impl rand::Rng) -> Map {

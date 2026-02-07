@@ -13,6 +13,7 @@ pub enum TileType {
     UpStairs,
     DoorClosed,
     DoorOpen,
+    SecretWall,
 }
 
 impl TileType {
@@ -24,7 +25,7 @@ impl TileType {
     }
 
     pub fn blocks_fov(&self) -> bool {
-        matches!(self, TileType::Wall | TileType::DoorClosed)
+        matches!(self, TileType::Wall | TileType::DoorClosed | TileType::SecretWall)
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -35,6 +36,7 @@ impl TileType {
             TileType::UpStairs => "UpStairs",
             TileType::DoorClosed => "DoorClosed",
             TileType::DoorOpen => "DoorOpen",
+            TileType::SecretWall => "Wall", // Renders as Wall to hide from player
         }
     }
 }

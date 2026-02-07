@@ -302,6 +302,15 @@ pub fn all_items() -> Vec<ItemTemplate> {
             ammo_type: None, ranged: None, hunger_restore: 0,
         },
 
+        ItemTemplate {
+            name: "Scroll of Detection", glyph: 0x3F, item_type: ItemType::Scroll,
+            slot: None, power: 0, speed_mod: 0,
+            effect: Some(ItemEffect::RevealSecrets),
+            charges: None, energy_cost: 100,
+            min_floor: 3, rarity: Rarity::Rare,
+            ammo_type: None, ranged: None, hunger_restore: 0,
+        },
+
         // Food
         ItemTemplate {
             name: "Food Ration", glyph: 0x25, item_type: ItemType::Food,

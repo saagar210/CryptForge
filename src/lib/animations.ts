@@ -109,6 +109,16 @@ export function queueAnimationsFromEvents(events: GameEvent[], entities?: Entity
       });
     } else if ("BossDefeated" in event) {
       triggerShake(6);
+    } else if ("SecretRoomFound" in event) {
+      ACTIVE.push({
+        type: "level_up_flash",
+        position: event.SecretRoomFound.position,
+        startTime: now,
+        duration: 500,
+        color: "#FFD700",
+        progress: 0,
+      });
+      spawnParticles("gold", event.SecretRoomFound.position.x, event.SecretRoomFound.position.y, 20);
     }
   }
 }

@@ -305,6 +305,7 @@ pub enum ItemEffect {
     DamageArea { damage: i32, radius: i32 },
     ApplyStatus { effect: StatusType, duration: u32 },
     RevealMap,
+    RevealSecrets,
     Teleport,
     CureStatus,
     RangedAttack { damage: i32, status: Option<(StatusType, u32)> },
