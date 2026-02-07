@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicklvsa/tauri-v2-schema/main/tauri.schema.json",
+  "productName": "CryptForge",
+  "version": "0.1.0",
+  "identifier": "com.cryptforge.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CryptForge",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "minWidth": 960,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {}
+}
