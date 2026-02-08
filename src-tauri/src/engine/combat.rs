@@ -69,7 +69,7 @@ pub fn resolve_attack(
     let crit_chance = attacker.combat.as_ref().map_or(0.0, |c| c.crit_chance);
     let is_crit = rng.gen::<f32>() < crit_chance;
     if is_crit {
-        damage = (damage as f64 * 1.5) as i32;
+        damage = (damage as f64 * 1.5).round() as i32;
     }
 
     let target_hp = target.health.as_ref().map_or(0, |h| h.current);
@@ -112,7 +112,7 @@ pub fn resolve_ranged_attack(
     let crit_chance = attacker.combat.as_ref().map_or(0.0, |c| c.crit_chance);
     let is_crit = rng.gen::<f32>() < crit_chance;
     if is_crit {
-        damage = (damage as f64 * 1.5) as i32;
+        damage = (damage as f64 * 1.5).round() as i32;
     }
 
     let target_hp = target.health.as_ref().map_or(0, |h| h.current);

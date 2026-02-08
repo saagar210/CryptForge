@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from "react";
 import type { GameState, GameEvent } from "../../types/game";
-import { createCamera, updateCamera, renderFrame, type Camera, type HoveredTile, type TargetingState } from "../../lib/renderer";
+import { createCamera, updateCamera, renderFrame, clearFovAlphaMap, resetShakeState, type Camera, type HoveredTile, type TargetingState } from "../../lib/renderer";
 import { queueAnimationsFromEvents, updateAnimations, renderAnimations } from "../../lib/animations";
 import { updateParticles, renderParticles, queueParticlesFromEvents, queueParticlesFromStatus } from "../../lib/particles";
 
@@ -31,6 +31,11 @@ export function GameCanvas({ gameState, events, onCanvasClick, onCanvasRightClic
   useEffect(() => {
     if (events !== prevEventsRef.current && events.length > 0) {
       prevEventsRef.current = events;
+      // Clear FOV alpha map on floor change so tiles don't ghost from previous floor
+      if (events.some((e) => typeof e === "object" && "StairsDescended" in e)) {
+        clearFovAlphaMap();
+        resetShakeState();
+      }
       queueAnimationsFromEvents(events, gameState.visible_entities);
       queueParticlesFromEvents(events, gameState.visible_entities);
     }

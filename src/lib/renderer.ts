@@ -115,8 +115,9 @@ function bresenhamLine(x0: number, y0: number, x1: number, y1: number): Position
   const sx = x0 < x1 ? 1 : -1;
   const sy = y0 < y1 ? 1 : -1;
   let err = dx + dy;
+  const maxIterations = dx - dy + 2; // Manhattan distance + slack
 
-  for (;;) {
+  for (let i = 0; i < maxIterations; i++) {
     points.push({ x, y });
     if (x === x1 && y === y1) break;
     const e2 = 2 * err;
@@ -136,6 +137,28 @@ const SHAKE_DURATION = 150;
 /** Clear FOV alpha map (call on floor change). */
 export function clearFovAlphaMap(): void {
   tileAlphaMap.clear();
+}
+
+/** Cap the FOV alpha map to prevent unbounded memory growth. */
+const MAX_FOV_ENTRIES = 20000;
+function pruneAlphaMap(): void {
+  if (tileAlphaMap.size > MAX_FOV_ENTRIES) {
+    // Remove oldest entries (first inserted)
+    const excess = tileAlphaMap.size - MAX_FOV_ENTRIES;
+    const iter = tileAlphaMap.keys();
+    for (let i = 0; i < excess; i++) {
+      const key = iter.next().value;
+      if (key !== undefined) tileAlphaMap.delete(key);
+    }
+  }
+}
+
+/** Reset screen shake state (call on new game or session change). */
+export function resetShakeState(): void {
+  shakeOffsetX = 0;
+  shakeOffsetY = 0;
+  shakeDecay = 0;
+  shakeStartTime = 0;
 }
 
 export function triggerShake(intensity: number): void {
@@ -177,6 +200,7 @@ export function renderFrame(
 
   // Apply screen shake
   updateShake();
+  pruneAlphaMap();
   ctx.save();
   ctx.translate(shakeOffsetX, shakeOffsetY);
 

@@ -26,7 +26,9 @@ export function useAudio(
     return () => {
       window.removeEventListener("keydown", handleInteraction);
       window.removeEventListener("click", handleInteraction);
-      stopAmbient();
+      if (initialized.current) {
+        stopAmbient();
+      }
     };
   }, []);
 

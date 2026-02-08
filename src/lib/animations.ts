@@ -14,6 +14,7 @@ export interface Animation {
 }
 
 const ACTIVE: Animation[] = [];
+const MAX_ANIMATIONS = 100;
 
 export function getActiveAnimations(): readonly Animation[] {
   return ACTIVE;
@@ -27,6 +28,8 @@ export function queueAnimationsFromEvents(events: GameEvent[], entities?: Entity
   };
 
   for (const event of events) {
+    // Cap active animations to prevent unbounded growth
+    if (ACTIVE.length >= MAX_ANIMATIONS) break;
     if (event === "Victory") continue;
 
     if ("DamageTaken" in event) {

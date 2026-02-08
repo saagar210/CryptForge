@@ -596,6 +596,11 @@ impl World {
 
         let mut result = combat::resolve_attack(&attacker, &target, &mut self.rng);
 
+        // Cleave bonus: flat bonus damage for player melee attacks
+        if attacker_id == self.player_id && self.cleave_bonus > 0 {
+            result.damage += self.cleave_bonus;
+        }
+
         // GlassCannon modifier: 2x all damage
         if self.modifiers.contains(&RunModifier::GlassCannon) {
             result.damage *= 2;
@@ -1784,7 +1789,11 @@ impl World {
                     .filter(|p| self.map.get_tile(p.x, p.y) == TileType::Floor && !self.is_blocked(*p, entity_id))
                     .collect();
 
-                if let Some(&new_pos) = floor_tiles.get(self.rng.gen_range(0..floor_tiles.len().max(1))) {
+                if floor_tiles.is_empty() {
+                    self.push_message("The teleport trap fizzles...", LogSeverity::Info);
+                } else {
+                    let idx = self.rng.gen_range(0..floor_tiles.len());
+                    let new_pos = floor_tiles[idx];
                     let from = self.get_entity(entity_id).unwrap().position;
                     self.move_entity(entity_id, new_pos);
                     events.push(GameEvent::Moved {
@@ -1792,13 +1801,13 @@ impl World {
                         from,
                         to: new_pos,
                     });
+                    self.push_message("A teleport trap whisks you away!", LogSeverity::Warning);
                 }
                 events.push(GameEvent::TrapTriggered {
                     position: pos,
                     trap_type: "Teleport".to_string(),
                     damage: 0,
                 });
-                self.push_message("A teleport trap whisks you away!", LogSeverity::Warning);
             }
             TrapType::Alarm => {
                 events.push(GameEvent::TrapTriggered {
@@ -2063,7 +2072,12 @@ impl World {
                     .filter(|p| self.map.get_tile(p.x, p.y) == TileType::Floor && !self.is_blocked(*p, self.player_id))
                     .collect();
 
-                if let Some(&new_pos) = floor_tiles.get(self.rng.gen_range(0..floor_tiles.len().max(1))) {
+                if floor_tiles.is_empty() {
+                    effect_desc = "teleportation failed".to_string();
+                    self.push_message("The teleportation fizzles...", LogSeverity::Warning);
+                } else {
+                    let idx = self.rng.gen_range(0..floor_tiles.len());
+                    let new_pos = floor_tiles[idx];
                     let from = self.get_entity(self.player_id).unwrap().position;
                     self.move_entity(self.player_id, new_pos);
                     events.push(GameEvent::Moved {
@@ -2071,9 +2085,9 @@ impl World {
                         from,
                         to: new_pos,
                     });
+                    effect_desc = "teleported".to_string();
+                    self.push_message("You are teleported!", LogSeverity::Info);
                 }
-                effect_desc = "teleported".to_string();
-                self.push_message("You are teleported!", LogSeverity::Info);
             }
             Some(ItemEffect::CureStatus) => {
                 if let Some(player) = self.get_entity_mut(self.player_id) {
@@ -2104,7 +2118,7 @@ impl World {
                 self.push_message(&format!("You feel the effects of the {}.", item.name), LogSeverity::Info);
             }
             Some(ItemEffect::DamageArea { damage, radius }) => {
-                let damage = *damage;
+                let damage = *damage + self.spell_power_bonus;
                 let radius = *radius;
                 let player_pos = self.get_entity(self.player_id).unwrap().position;
 
