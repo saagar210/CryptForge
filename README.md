@@ -44,6 +44,21 @@ npm run tauri dev
 
 **Requirements:** Rust, Node.js 18+, Tauri 2 CLI
 
+
+## ✅ Verification
+
+```bash
+npm run verify:frontend
+npm run verify:rust
+```
+
+- `verify:frontend` runs TypeScript + production build checks.
+- `verify:rust` runs a native dependency preflight and then `cargo test`.
+
+### Linux note (Tauri native deps)
+
+If `verify:rust` fails on `glib-2.0`, install your distro glib dev package (for example `libglib2.0-dev`) and ensure `pkg-config` is installed.
+
 ---
 
 ## 🎮 Controls
