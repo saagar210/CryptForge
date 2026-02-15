@@ -1,6 +1,6 @@
 # Branch Protection Setup
 
-This document explains how to enable branch protection rules on the `main` branch to ensure that all code passing through CI before merging.
+This document explains how to enable branch protection rules on the `main` branch to ensure that all code passes through CI before merging.
 
 ## Why Branch Protection?
 
