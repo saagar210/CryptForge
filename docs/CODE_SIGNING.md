@@ -112,7 +112,6 @@ The release workflow uses environment variables, but you can also configure in `
 {
   "bundle": {
     "macOS": {
-      "signingIdentity": null,
       "entitlements": null,
       "exceptionDomain": null,
       "frameworks": [],
