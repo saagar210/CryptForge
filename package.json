@@ -8,9 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "doctor:tauri": "node scripts/doctor-tauri.mjs",
     "verify:frontend": "npm run build",
-    "verify:rust": "npm run doctor:tauri && cargo test --manifest-path src-tauri/Cargo.toml",
+    "verify:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "verify": "npm run verify:frontend && npm run verify:rust"
   },
   "dependencies": {
