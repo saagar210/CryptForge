@@ -178,7 +178,7 @@ certmgr.msc
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.comodoca.com"
+      "timestampUrl": "http://timestamp.sectigo.com"
     }
   }
 }
