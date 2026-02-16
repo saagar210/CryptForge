@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
+    "dev": "node ./node_modules/vite/bin/vite.js",
+    "dev:lean": "./scripts/lean-dev.sh",
+    "build": "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "tauri": "node ./node_modules/@tauri-apps/cli/tauri.js",
+    "clean:heavy": "./scripts/cleanup-heavy.sh",
+    "clean:full": "./scripts/cleanup-full.sh",
     "verify:frontend": "npm run build",
     "verify:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "verify": "npm run verify:frontend && npm run verify:rust"
